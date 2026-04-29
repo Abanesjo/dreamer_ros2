@@ -1,0 +1,26 @@
+<launch>
+  <arg name="frame_id" default="world"/>
+  <arg name="map_topic" default="/map"/>
+  <arg name="bbox_topic" default="/bbox_3d"/>
+  <arg name="marker_topic" default="/dynamic_obstacles"/>
+  <arg name="radius" default="0.5"/>
+  <arg name="segments" default="64"/>
+  <arg name="line_width" default="0.04"/>
+  <arg name="rviz_config" default="$(find-pkg-share dreamer)/rviz/config.rviz"/>
+
+  <node pkg="dreamer" exec="map_publisher.py" name="dreamer_map_publisher" output="screen">
+    <param name="frame_id" value="$(var frame_id)"/>
+    <param name="topic" value="$(var map_topic)"/>
+  </node>
+
+  <node pkg="dreamer" exec="bbox_circle_markers.py" name="dreamer_bbox_circle_markers" output="screen">
+    <param name="frame_id" value="$(var frame_id)"/>
+    <param name="input_topic" value="$(var bbox_topic)"/>
+    <param name="marker_topic" value="$(var marker_topic)"/>
+    <param name="radius" value="$(var radius)"/>
+    <param name="segments" value="$(var segments)"/>
+    <param name="line_width" value="$(var line_width)"/>
+  </node>
+
+  <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" args="-d $(var rviz_config)"/>
+</launch>

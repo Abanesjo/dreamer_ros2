@@ -1,0 +1,20 @@
+services:
+  dreamer_ros2:
+    build: . 
+    container_name: dreamer_ros2
+    network_mode: host
+    privileged: true
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+              
+    volumes: 
+    - /tmp/.X11-unix:/tmp/.X11-unix
+    - ../src:/workspace/ros2_ws/src
+    stdin_open: true
+    tty: true
