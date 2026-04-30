@@ -22,8 +22,6 @@ RUN apt install -y \
     libfmt-dev \
     tmux
 
-RUN python3 -m pip install --upgrade pip setuptools wheel
-
 RUN python3 -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu130
 
 RUN mkdir -p /workspace/ros2_ws

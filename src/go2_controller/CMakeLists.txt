@@ -15,7 +15,7 @@ find_package(rosgraph_msgs REQUIRED)
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS
-  scripts/go2_policy_node
+  scripts/go2_policy_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

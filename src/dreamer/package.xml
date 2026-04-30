@@ -18,6 +18,7 @@
   <depend>visualization_msgs</depend>
 
   <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>go2_controller</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

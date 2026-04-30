@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec /home/john/isaacsim/_build/linux-x86_64/release/python.sh -m go2_controller.go2_policy_node "$@"
