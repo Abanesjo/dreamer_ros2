@@ -83,7 +83,7 @@ controller_server:
       iteration_count: 1
       temperature: 0.3
       gamma: 0.015
-      visualize: false
+      visualize: true
       publish_optimal_trajectory: true
       regenerate_noises: false
       motion_model: "DiffDrive"
@@ -164,7 +164,7 @@ local_costmap:
   local_costmap:
     ros__parameters:
       update_frequency: 10.0
-      publish_frequency: 5.0
+      publish_frequency: 10.0
       global_frame: "GLOBAL_FRAME"
       robot_base_frame: "ROBOT_BASE_FRAME"
       transform_tolerance: 0.2
