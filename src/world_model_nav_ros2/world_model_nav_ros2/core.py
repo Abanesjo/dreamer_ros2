@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -146,6 +145,15 @@ class StepResult:
     tracking_active: bool = False
 
 
+@dataclass(frozen=True)
+class WaypointResult:
+    waypoint_world: np.ndarray | None = None
+    message: str | None = None
+    message_level: str = "info"
+    goal_reached: bool = False
+    tracking_active: bool = False
+
+
 def zero_command() -> np.ndarray:
     return np.zeros((2,), dtype=np.float32)
 
@@ -240,7 +248,128 @@ class DynamicObstacleTracker:
         return [obstacle.clone() for obstacle in self.obstacles]
 
 
-class WorldModelNavigator:
+class AStarPathPlanner:
+    def __init__(self, nav_config: NavigationConfig) -> None:
+        self.nav_config = nav_config
+        self.map_state: MapState | None = None
+        self.robot_pose: np.ndarray | None = None
+        self.path_world: np.ndarray | None = None
+        self.goal_xy: np.ndarray | None = None
+
+    def set_map(
+        self,
+        data: list[int] | tuple[int, ...] | np.ndarray,
+        *,
+        width: int,
+        height: int,
+        resolution: float,
+        origin: tuple[float, float],
+    ) -> None:
+        self.map_state = build_map_state(
+            data,
+            width=width,
+            height=height,
+            resolution=resolution,
+            origin=origin,
+            robot_radius=float(self.nav_config.robot_radius),
+            inflation_margin=float(self.nav_config.inflation_margin),
+            occupied_threshold=int(self.nav_config.map_occupied_threshold),
+            treat_unknown_as_occupied=bool(self.nav_config.treat_unknown_as_occupied),
+        )
+
+    def set_robot_pose(self, pose: np.ndarray) -> None:
+        self.robot_pose = np.asarray(pose, dtype=float).reshape(3)
+
+    def plan_to_goal(self, goal_xy: np.ndarray) -> PlanResult:
+        if self.map_state is None or self.robot_pose is None:
+            return PlanResult(False, "Cannot plan yet; waiting for map and odom.")
+
+        goal = np.asarray(goal_xy, dtype=float).reshape(2)
+        start_rc = world_to_grid(self.robot_pose[:2], self.map_state.resolution, self.map_state.origin)
+        goal_rc = world_to_grid(goal, self.map_state.resolution, self.map_state.origin)
+
+        if not self._cell_is_free(start_rc):
+            return self._clear_plan("Start pose is outside the planning map or inside inflated occupancy.")
+        if not self._cell_is_free(goal_rc):
+            return self._clear_plan("Goal pose is outside the planning map or inside inflated occupancy.")
+
+        path_rc = astar_search(self.map_state.planning_occupancy, start_rc, goal_rc)
+        if not path_rc:
+            return self._clear_plan("A* could not find a path to the requested goal.")
+
+        self.goal_xy = goal.copy()
+        self.path_world = path_to_world(path_rc, self.map_state.resolution, self.map_state.origin)
+        return PlanResult(True, f"Planned path with {len(self.path_world)} poses.", self.path_world.copy())
+
+    def _cell_is_free(self, cell: tuple[int, int]) -> bool:
+        assert self.map_state is not None
+        row, col = cell
+        occupancy = self.map_state.planning_occupancy
+        return 0 <= row < occupancy.shape[0] and 0 <= col < occupancy.shape[1] and occupancy[row, col] == 0
+
+    def _clear_plan(self, message: str) -> PlanResult:
+        self.path_world = None
+        self.goal_xy = None
+        return PlanResult(False, message)
+
+
+class PathWaypointTracker:
+    def __init__(self, *, lookahead_distance: float, goal_tolerance: float) -> None:
+        self.lookahead_distance = float(lookahead_distance)
+        self.goal_tolerance = float(goal_tolerance)
+        self.robot_pose: np.ndarray | None = None
+        self.path_world: np.ndarray | None = None
+        self.tracking_active = False
+
+    def set_robot_pose(self, pose: np.ndarray) -> None:
+        self.robot_pose = np.asarray(pose, dtype=float).reshape(3)
+
+    def set_path(self, path_world: np.ndarray | None) -> None:
+        if path_world is None or len(path_world) == 0:
+            self.path_world = None
+            self.tracking_active = False
+            return
+        next_path = np.asarray(path_world, dtype=float).reshape((-1, 2))
+        if (
+            self.path_world is not None
+            and self.path_world.shape == next_path.shape
+            and np.allclose(self.path_world, next_path)
+        ):
+            return
+        self.path_world = next_path.copy()
+        self.tracking_active = True
+
+    def step(self) -> WaypointResult:
+        if not self.tracking_active or self.path_world is None or len(self.path_world) == 0:
+            return WaypointResult(tracking_active=False)
+        if self.robot_pose is None:
+            return WaypointResult(
+                message="Waiting for odom before publishing tracked waypoint.",
+                message_level="warning",
+                tracking_active=True,
+            )
+
+        if np.linalg.norm(self.robot_pose[:2] - self.path_world[-1]) <= self.goal_tolerance:
+            self.tracking_active = False
+            return WaypointResult(
+                message="Goal reached; stopping waypoint tracking.",
+                message_level="info",
+                goal_reached=True,
+                tracking_active=False,
+            )
+
+        waypoint = compute_local_subgoal(
+            self.robot_pose,
+            self.path_world,
+            self.lookahead_distance,
+        )
+        return WaypointResult(
+            waypoint_world=np.asarray(waypoint["selected_subgoal_world"], dtype=float),
+            tracking_active=True,
+        )
+
+
+class WorldModelPolicyController:
     def __init__(
         self,
         nav_config: NavigationConfig,
@@ -272,9 +401,11 @@ class WorldModelNavigator:
         self.map_state: MapState | None = None
         self.robot_pose: np.ndarray | None = None
         self.path_world: np.ndarray | None = None
+        self.tracked_waypoint: np.ndarray | None = None
         self.goal_xy: np.ndarray | None = None
         self.tracking_active = False
         self._pending_commit: dict[str, object] | None = None
+        self._reset_policy_pending = False
 
     def set_map(
         self,
@@ -300,6 +431,30 @@ class WorldModelNavigator:
     def set_robot_pose(self, pose: np.ndarray) -> None:
         self.robot_pose = np.asarray(pose, dtype=float).reshape(3)
 
+    def set_path(self, path_world: np.ndarray | None) -> bool:
+        if path_world is None or len(path_world) == 0:
+            self._clear_path()
+            return True
+
+        next_path = np.asarray(path_world, dtype=float).reshape((-1, 2))
+        if (
+            self.path_world is not None
+            and self.path_world.shape == next_path.shape
+            and np.allclose(self.path_world, next_path)
+        ):
+            return False
+
+        self.path_world = next_path.copy()
+        self.goal_xy = self.path_world[-1].copy()
+        self.tracked_waypoint = None
+        self.tracking_active = True
+        self._pending_commit = None
+        self._reset_policy_pending = True
+        return True
+
+    def set_tracked_waypoint(self, waypoint: np.ndarray) -> None:
+        self.tracked_waypoint = np.asarray(waypoint, dtype=float).reshape(2)
+
     def set_obstacle_observations(
         self,
         observations: list[ObstacleObservation],
@@ -310,41 +465,9 @@ class WorldModelNavigator:
     def obstacles(self) -> list[RuntimeDynamicObstacle]:
         return [obstacle.clone() for obstacle in self.obstacle_tracker.obstacles]
 
-    def plan_to_goal(self, goal_xy: np.ndarray) -> PlanResult:
-        if self.map_state is None or self.robot_pose is None:
-            return PlanResult(False, "Cannot plan yet; waiting for map and odom.")
-
-        goal = np.asarray(goal_xy, dtype=float).reshape(2)
-        start_rc = world_to_grid(self.robot_pose[:2], self.map_state.resolution, self.map_state.origin)
-        goal_rc = world_to_grid(goal, self.map_state.resolution, self.map_state.origin)
-
-        if not self._cell_is_free(start_rc):
-            return self._clear_plan("Start pose is outside the planning map or inside inflated occupancy.")
-        if not self._cell_is_free(goal_rc):
-            return self._clear_plan("Goal pose is outside the planning map or inside inflated occupancy.")
-
-        path_rc = astar_search(self.map_state.planning_occupancy, start_rc, goal_rc)
-        if not path_rc:
-            return self._clear_plan("A* could not find a path to the requested goal.")
-
-        self.goal_xy = goal.copy()
-        self.path_world = path_to_world(path_rc, self.map_state.resolution, self.map_state.origin)
-        self.tracking_active = True
-        self._pending_commit = None
-        self.policy.reset(initial_pose=self.robot_pose.copy(), seed=int(self.nav_config.policy_seed))
-        return PlanResult(True, f"Planned path with {len(self.path_world)} poses.", self.path_world.copy())
-
-    def replan_to_current_goal(self) -> PlanResult | None:
-        if self.goal_xy is None:
-            return None
-        return self.plan_to_goal(self.goal_xy)
-
     def step(self) -> StepResult:
         if not self.tracking_active or self.path_world is None or len(self.path_world) == 0:
-            return StepResult(
-                command=zero_command(),
-                tracking_active=False,
-            )
+            return StepResult(command=zero_command(), tracking_active=False)
 
         ready_message = self._readiness_error()
         if ready_message is not None:
@@ -358,6 +481,11 @@ class WorldModelNavigator:
         assert self.robot_pose is not None
         assert self.map_state is not None
         assert self.path_world is not None
+        assert self.tracked_waypoint is not None
+
+        if self._reset_policy_pending:
+            self.policy.reset(initial_pose=self.robot_pose.copy(), seed=int(self.nav_config.policy_seed))
+            self._reset_policy_pending = False
 
         dynamic_obstacles = self.obstacles
         if self._pending_commit is not None:
@@ -375,10 +503,12 @@ class WorldModelNavigator:
 
         if np.linalg.norm(self.robot_pose[:2] - self.path_world[-1]) <= float(self.nav_config.goal_tolerance):
             self.tracking_active = False
+            self.tracked_waypoint = None
             self._pending_commit = None
+            self._reset_policy_pending = False
             return StepResult(
                 command=zero_command(),
-                message="Goal reached; stopping path tracking.",
+                message="Goal reached; stopping policy controller.",
                 message_level="info",
                 goal_reached=True,
                 tracking_active=False,
@@ -386,14 +516,9 @@ class WorldModelNavigator:
 
         robot_pose_est = np.asarray(self.policy.current_pose_estimate(), dtype=float)
         try:
-            waypoint = compute_local_subgoal(
-                robot_pose_est,
-                self.path_world,
-                float(self.nav_config.lookahead_distance),
-            )
             decision = self.policy.select_action(
                 robot_pose=robot_pose_est,
-                current_subgoal_world=np.asarray(waypoint["selected_subgoal_world"], dtype=float),
+                current_subgoal_world=self.tracked_waypoint.copy(),
                 path_world=self.path_world,
                 planning_occupancy=self.map_state.planning_occupancy,
                 true_occupancy=self.map_state.true_occupancy,
@@ -422,25 +547,23 @@ class WorldModelNavigator:
         }
         return StepResult(
             command=command,
-            subgoal_world=np.asarray(waypoint["selected_subgoal_world"], dtype=float),
+            subgoal_world=self.tracked_waypoint.copy(),
             tracking_active=True,
         )
 
-    def _cell_is_free(self, cell: tuple[int, int]) -> bool:
-        assert self.map_state is not None
-        row, col = cell
-        occupancy = self.map_state.planning_occupancy
-        return 0 <= row < occupancy.shape[0] and 0 <= col < occupancy.shape[1] and occupancy[row, col] == 0
-
-    def _clear_plan(self, message: str) -> PlanResult:
+    def _clear_path(self) -> None:
         self.tracking_active = False
         self.path_world = None
+        self.tracked_waypoint = None
+        self.goal_xy = None
         self._pending_commit = None
-        return PlanResult(False, message)
+        self._reset_policy_pending = False
 
     def _readiness_error(self) -> str | None:
         if self.map_state is None or self.robot_pose is None:
             return "Waiting for map and odom before controlling."
+        if self.tracked_waypoint is None:
+            return "Waiting for tracked waypoint before controlling."
         if len(self.obstacle_tracker.obstacles) != int(self.nav_config.expected_dynamic_obstacles):
             return (
                 f"Waiting for {int(self.nav_config.expected_dynamic_obstacles)} dynamic obstacles; "

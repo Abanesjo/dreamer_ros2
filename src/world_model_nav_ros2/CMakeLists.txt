@@ -15,7 +15,9 @@ find_package(visualization_msgs REQUIRED)
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS
-  scripts/world_model_nav_node.py
+  scripts/astar_planner_node.py
+  scripts/waypoint_tracker_node.py
+  scripts/policy_controller_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

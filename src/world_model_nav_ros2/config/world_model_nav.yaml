@@ -1,4 +1,4 @@
-world_model_nav:
+/**:
   ros__parameters:
     use_sim_time: true
     frame_id: odom
@@ -10,8 +10,12 @@ world_model_nav:
     path_topic: /path
     cmd_vel_topic: /cmd_vel
     subgoal_topic: /world_model_nav/subgoal
+    tracked_waypoint_topic: /world_model_nav/tracked_waypoint
+    robot_marker_topic: /world_model_nav/robot_footprint
 
     control_frequency: 10.0
+    waypoint_frequency: 10.0
+    path_republish_frequency: 1.0
     policy_path: ""
     device: auto
     policy_seed: 0
@@ -19,6 +23,8 @@ world_model_nav:
     lookahead_distance: 1.0
     goal_tolerance: 0.4
     robot_radius: 0.19
+    robot_marker_segments: 64
+    robot_marker_line_width: 0.04
     inflation_margin: 0.05
     map_occupied_threshold: 50
     treat_unknown_as_occupied: true
