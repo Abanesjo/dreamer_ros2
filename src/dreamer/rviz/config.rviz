@@ -103,9 +103,9 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 0.09179427474737167
+      Max Intensity: 0.08924166858196259
       Min Color: 0; 0; 0
-      Min Intensity: 0.005194070748984814
+      Min Intensity: 0.005184505600482225
       Name: PointCloud2
       Position Transformer: XYZ
       Selectable: true
@@ -345,7 +345,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: world
+    Fixed Frame: odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -388,25 +388,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 8.107542991638184
+      Distance: 13.136160850524902
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.7882475852966309
-        Y: -2.7360646724700928
+        X: -3.21327543258667
+        Y: -1.2828176021575928
         Z: 1.5495302250201348e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.3053985834121704
+      Pitch: 0.5703984498977661
       Target Frame: <Fixed Frame>
       Value: ThirdPersonFollower (rviz_default_plugins)
-      Yaw: 0.1454177051782608
+      Yaw: 3.4935946464538574
     Saved: ~
 Window Geometry:
   Displays:

@@ -1,7 +1,7 @@
 <launch>
   <arg name="rviz" default="false"/>
   <arg name="use_sim_time" default="true"/>
-  <arg name="frame_id" default="world"/>
+  <arg name="frame_id" default="odom"/>
   <arg name="map_topic" default="/map"/>
   <arg name="bbox_topic" default="/bbox_3d"/>
   <arg name="marker_topic" default="/dynamic_obstacles"/>
