@@ -35,6 +35,7 @@
     dynamic_obstacle_radius: 0.5
     expected_dynamic_obstacles: 4
     min_obstacle_dt: 0.001
+    dynamic_obstacle_stale_timeout: 1.0
 
     controller:
       horizon: 10

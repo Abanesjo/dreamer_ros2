@@ -15,6 +15,9 @@ RUN apt install -y \
     ros-jazzy-rosbag2-cpp \
     ros-jazzy-vision-msgs \
     ros-jazzy-foxglove-bridge \
+    ros-jazzy-joint-state-publisher-gui \
+    ros2-jazzy-navigation2 \ 
+    ros-jazzy-nav2-bringup \
     python3-pip \
     libyaml-cpp-dev \
     python3-pip \

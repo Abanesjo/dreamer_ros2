@@ -35,6 +35,7 @@ class NavigationConfig:
     dynamic_obstacle_radius: float = 0.5
     expected_dynamic_obstacles: int = 4
     min_obstacle_dt: float = 1e-3
+    dynamic_obstacle_stale_timeout: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,11 @@ class StepResult:
     selected_action_name: str | None = None
     chosen_action_min_clearance: float | None = None
     pose_estimate_error: float | None = None
+    selection_mode: str | None = None
+    num_feasible_non_stop: int | None = None
+    num_feasible_all: int | None = None
+    obstacle_count: int | None = None
+    chosen_infeasible_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -212,42 +218,66 @@ def build_map_state(
 
 
 class DynamicObstacleTracker:
-    def __init__(self, *, radius: float, min_dt: float) -> None:
+    def __init__(self, *, radius: float, min_dt: float, stale_timeout: float) -> None:
         self.radius = float(radius)
         self.min_dt = float(min_dt)
-        self._previous: dict[str, tuple[np.ndarray, float]] = {}
+        self.stale_timeout = float(stale_timeout)
+        self._tracks: dict[str, tuple[np.ndarray, float, np.ndarray]] = {}
         self.obstacles: list[RuntimeDynamicObstacle] = []
 
-    def update(self, observations: list[ObstacleObservation]) -> list[RuntimeDynamicObstacle]:
+    def update(
+        self,
+        observations: list[ObstacleObservation],
+        *,
+        stamp_sec: float | None = None,
+    ) -> list[RuntimeDynamicObstacle]:
         observations = sorted(observations, key=lambda item: int(item.marker_id))
-        next_previous: dict[str, tuple[np.ndarray, float]] = {}
-        obstacles: list[RuntimeDynamicObstacle] = []
+        if stamp_sec is None:
+            if observations:
+                stamp_sec = max(float(observation.stamp_sec) for observation in observations)
+            elif self._tracks:
+                stamp_sec = max(float(track[1]) for track in self._tracks.values())
+            else:
+                stamp_sec = 0.0
+        now = float(stamp_sec)
+        observed_ids: set[str] = set()
 
         for observation in observations:
             obstacle_id = f"dyn_{int(observation.marker_id):02d}"
             position = np.asarray(observation.position, dtype=float).reshape(2)
-            previous = self._previous.get(obstacle_id)
+            previous = self._tracks.get(obstacle_id)
             if previous is None:
                 velocity = np.zeros((2,), dtype=float)
             else:
-                previous_position, previous_stamp = previous
+                previous_position, previous_stamp, previous_velocity = previous
                 dt = float(observation.stamp_sec) - float(previous_stamp)
                 velocity = (
                     (position - previous_position) / dt
                     if dt > self.min_dt
-                    else np.zeros((2,), dtype=float)
-                )
+                    else previous_velocity.copy()
+                ).astype(float)
+            self._tracks[obstacle_id] = (position.copy(), float(observation.stamp_sec), velocity.copy())
+            observed_ids.add(obstacle_id)
+
+        obstacles: list[RuntimeDynamicObstacle] = []
+        active_tracks: dict[str, tuple[np.ndarray, float, np.ndarray]] = {}
+        for obstacle_id in sorted(self._tracks):
+            position, last_stamp, velocity = self._tracks[obstacle_id]
+            age = max(0.0, now - float(last_stamp))
+            if obstacle_id not in observed_ids and (self.stale_timeout <= 0.0 or age > self.stale_timeout):
+                continue
+            active_tracks[obstacle_id] = (position.copy(), float(last_stamp), velocity.copy())
+            rendered_position = position + velocity * age if obstacle_id not in observed_ids else position
             obstacles.append(
                 RuntimeDynamicObstacle(
                     obstacle_id=obstacle_id,
-                    position=position.copy(),
+                    position=np.asarray(rendered_position, dtype=float).reshape(2),
                     radius=self.radius,
                     velocity_vector=velocity.astype(float),
                 )
             )
-            next_previous[obstacle_id] = (position.copy(), float(observation.stamp_sec))
 
-        self._previous = next_previous
+        self._tracks = active_tracks
         self.obstacles = obstacles
         return [obstacle.clone() for obstacle in self.obstacles]
 
@@ -401,6 +431,7 @@ class WorldModelPolicyController:
         self.obstacle_tracker = DynamicObstacleTracker(
             radius=float(nav_config.dynamic_obstacle_radius),
             min_dt=float(nav_config.min_obstacle_dt),
+            stale_timeout=float(nav_config.dynamic_obstacle_stale_timeout),
         )
         self.map_state: MapState | None = None
         self.robot_pose: np.ndarray | None = None
@@ -462,8 +493,10 @@ class WorldModelPolicyController:
     def set_obstacle_observations(
         self,
         observations: list[ObstacleObservation],
+        *,
+        stamp_sec: float | None = None,
     ) -> list[RuntimeDynamicObstacle]:
-        return self.obstacle_tracker.update(observations)
+        return self.obstacle_tracker.update(observations, stamp_sec=stamp_sec)
 
     @property
     def obstacles(self) -> list[RuntimeDynamicObstacle]:
@@ -548,6 +581,8 @@ class WorldModelPolicyController:
             )
 
         command = np.array([float(decision["v"]), float(decision["omega"])], dtype=np.float32)
+        decision_debug = dict(decision.get("debug", {}))
+        chosen_debug = dict(decision_debug.get("chosen", {}))
         self._pending_commit = {
             "robot_pose_t": self.robot_pose.copy(),
             "robot_pose_est_t": robot_pose_for_policy.copy(),
@@ -564,6 +599,11 @@ class WorldModelPolicyController:
             selected_action_name=str(decision["action_name"]),
             chosen_action_min_clearance=float(decision["chosen_action_min_clearance"]),
             pose_estimate_error=pose_estimate_error,
+            selection_mode=str(decision_debug.get("selection_mode", "")),
+            num_feasible_non_stop=int(decision_debug.get("num_feasible_non_stop", 0)),
+            num_feasible_all=int(decision_debug.get("num_feasible_all", 0)),
+            obstacle_count=len(dynamic_obstacles),
+            chosen_infeasible_reasons=tuple(str(reason) for reason in chosen_debug.get("infeasible_reasons", [])),
         )
 
     def _clear_path(self) -> None:

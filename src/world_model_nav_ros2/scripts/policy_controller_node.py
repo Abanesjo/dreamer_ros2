@@ -61,6 +61,9 @@ class PolicyControllerNode(Node):
             dynamic_obstacle_radius=float(self.get_parameter("dynamic_obstacle_radius").value),
             expected_dynamic_obstacles=int(self.get_parameter("expected_dynamic_obstacles").value),
             min_obstacle_dt=float(self.get_parameter("min_obstacle_dt").value),
+            dynamic_obstacle_stale_timeout=float(
+                self.get_parameter("dynamic_obstacle_stale_timeout").value
+            ),
         )
         controller_config = ControllerConfigValues(
             horizon=int(self.get_parameter("controller.horizon").value),
@@ -159,6 +162,7 @@ class PolicyControllerNode(Node):
         self.declare_parameter("dynamic_obstacle_radius", 0.5)
         self.declare_parameter("expected_dynamic_obstacles", 4)
         self.declare_parameter("min_obstacle_dt", 1e-3)
+        self.declare_parameter("dynamic_obstacle_stale_timeout", 1.0)
 
         self.declare_parameter("controller.horizon", 10)
         self.declare_parameter("controller.w_progress", 2.0)
@@ -236,7 +240,7 @@ class PolicyControllerNode(Node):
                     stamp_sec=float(stamp_sec),
                 )
             )
-        self.controller.set_obstacle_observations(observations)
+        self.controller.set_obstacle_observations(observations, stamp_sec=now_sec)
 
     def _on_timer(self) -> None:
         self._publish_robot_marker()
@@ -309,7 +313,12 @@ class PolicyControllerNode(Node):
             f"action={result.selected_action_name}, "
             f"cmd=({float(result.command[0]):.2f}, {float(result.command[1]):.2f}), "
             f"min_clearance={min_clearance} m, "
-            f"pose_estimate_error={pose_error} m",
+            f"pose_estimate_error={pose_error} m, "
+            f"selection={result.selection_mode}, "
+            f"feasible_non_stop={result.num_feasible_non_stop}, "
+            f"feasible_all={result.num_feasible_all}, "
+            f"obstacles={result.obstacle_count}, "
+            f"reasons={list(result.chosen_infeasible_reasons)}",
         )
 
     def _warn_throttled(self, message: str, period: float = 2.0) -> None:
