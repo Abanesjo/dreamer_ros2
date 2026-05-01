@@ -52,7 +52,7 @@
       min_clearance_clip: 0.05
       backward_penalty_enabled: true
       backward_action_name: backward
-      backward_penalty: 0.25
+      backward_penalty: 10.0
       backward_gate_enabled: true
       dynamic_stop_clearance_threshold: 0.20
       backward_dynamic_margin: 0.10

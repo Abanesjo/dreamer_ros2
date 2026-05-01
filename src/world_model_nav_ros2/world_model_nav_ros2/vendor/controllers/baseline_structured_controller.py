@@ -43,7 +43,7 @@ class StructuredControllerConfig:
     min_clearance_clip: float = 0.05
     backward_penalty_enabled: bool = True
     backward_action_name: str = "backward"
-    backward_penalty: float = 0.25
+    backward_penalty: float = 10.0
     backward_gate_enabled: bool = True
     dynamic_stop_clearance_threshold: float = 0.20
     backward_dynamic_margin: float = 0.10

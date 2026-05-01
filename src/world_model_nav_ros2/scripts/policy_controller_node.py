@@ -183,7 +183,7 @@ class PolicyControllerNode(Node):
         self.declare_parameter("controller.min_clearance_clip", 0.05)
         self.declare_parameter("controller.backward_penalty_enabled", True)
         self.declare_parameter("controller.backward_action_name", "backward")
-        self.declare_parameter("controller.backward_penalty", 0.25)
+        self.declare_parameter("controller.backward_penalty", 10.0)
         self.declare_parameter("controller.backward_gate_enabled", True)
         self.declare_parameter("controller.dynamic_stop_clearance_threshold", 0.20)
         self.declare_parameter("controller.backward_dynamic_margin", 0.10)
