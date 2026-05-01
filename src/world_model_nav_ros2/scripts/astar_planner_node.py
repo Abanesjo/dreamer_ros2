@@ -69,7 +69,7 @@ class AStarPlannerNode(Node):
         self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("path_topic", "/path")
         self.declare_parameter("path_republish_frequency", 1.0)
-        self.declare_parameter("robot_radius", 0.19)
+        self.declare_parameter("robot_radius", 0.4)
         self.declare_parameter("inflation_margin", 0.05)
         self.declare_parameter("map_occupied_threshold", 50)
         self.declare_parameter("treat_unknown_as_occupied", True)

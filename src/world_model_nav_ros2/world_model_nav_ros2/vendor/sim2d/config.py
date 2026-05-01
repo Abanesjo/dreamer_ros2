@@ -36,7 +36,7 @@ class MapConfig:
 
 @dataclass
 class RobotConfig:
-    radius: float = 0.19
+    radius: float = 0.4
     dt: float = 0.1
     goal_tolerance: float = 0.4
 

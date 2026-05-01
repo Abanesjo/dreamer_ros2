@@ -150,7 +150,7 @@ class PolicyControllerNode(Node):
 
         self.declare_parameter("lookahead_distance", 1.0)
         self.declare_parameter("goal_tolerance", 0.4)
-        self.declare_parameter("robot_radius", 0.19)
+        self.declare_parameter("robot_radius", 0.4)
         self.declare_parameter("robot_marker_segments", 64)
         self.declare_parameter("robot_marker_line_width", 0.04)
         self.declare_parameter("inflation_margin", 0.05)
@@ -243,6 +243,7 @@ class PolicyControllerNode(Node):
         result = self.controller.step()
         self._publish_cmd(result.command)
         self._log_step_message(result)
+        self._log_step_debug(result)
 
     def _publish_cmd(self, command: np.ndarray) -> None:
         msg = Twist()
@@ -289,12 +290,41 @@ class PolicyControllerNode(Node):
         else:
             self.get_logger().info(result.message)
 
+    def _log_step_debug(self, result: StepResult) -> None:
+        if result.selected_action_name is None:
+            return
+        min_clearance = (
+            "nan"
+            if result.chosen_action_min_clearance is None
+            else f"{float(result.chosen_action_min_clearance):.3f}"
+        )
+        pose_error = (
+            "nan"
+            if result.pose_estimate_error is None
+            else f"{float(result.pose_estimate_error):.3f}"
+        )
+        self._info_throttled(
+            "policy_debug",
+            "Policy debug: "
+            f"action={result.selected_action_name}, "
+            f"cmd=({float(result.command[0]):.2f}, {float(result.command[1]):.2f}), "
+            f"min_clearance={min_clearance} m, "
+            f"pose_estimate_error={pose_error} m",
+        )
+
     def _warn_throttled(self, message: str, period: float = 2.0) -> None:
         now = self.get_clock().now().nanoseconds * 1e-9
         last = self._warn_last_time.get(message, -float("inf"))
         if now - last >= period:
             self.get_logger().warning(message)
             self._warn_last_time[message] = now
+
+    def _info_throttled(self, key: str, message: str, period: float = 2.0) -> None:
+        now = self.get_clock().now().nanoseconds * 1e-9
+        last = self._warn_last_time.get(key, -float("inf"))
+        if now - last >= period:
+            self.get_logger().info(message)
+            self._warn_last_time[key] = now
 
 
 def main(args: list[str] | None = None) -> None:

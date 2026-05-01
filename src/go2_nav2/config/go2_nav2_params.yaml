@@ -1,7 +1,7 @@
 bt_navigator:
   ros__parameters:
-    global_frame: "GLOBAL_FRAME"
-    robot_base_frame: "ROBOT_BASE_FRAME"
+    global_frame: "$(var global_frame)"
+    robot_base_frame: "$(var robot_base_frame)"
     odom_topic: "/odom"
     transform_tolerance: 0.2
     bt_loop_duration: 10
@@ -90,8 +90,8 @@ controller_server:
       DiffDrive:
         plugin: "mppi::DiffDriveMotionModel"
       TrajectoryVisualizer:
-        trajectory_step: 5
-        time_step: 3
+        trajectory_step: 10
+        time_step: 5
       TrajectoryValidator:
         plugin: "mppi::DefaultOptimalTrajectoryValidator"
         collision_lookahead_time: 2.0
@@ -165,8 +165,8 @@ local_costmap:
     ros__parameters:
       update_frequency: 10.0
       publish_frequency: 10.0
-      global_frame: "GLOBAL_FRAME"
-      robot_base_frame: "ROBOT_BASE_FRAME"
+      global_frame: "$(var global_frame)"
+      robot_base_frame: "$(var robot_base_frame)"
       transform_tolerance: 0.2
       rolling_window: true
       width: 6
@@ -179,7 +179,7 @@ local_costmap:
         enabled: true
         observation_sources: scan
         scan:
-          topic: "SCAN_TOPIC"
+          topic: "$(var scan_topic)"
           max_obstacle_height: 2.0
           clearing: true
           marking: true
@@ -188,10 +188,12 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 7.5
           obstacle_min_range: 0.0
+          inf_is_valid: true
+          observation_persistence: 0.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 2.0
+        inflation_radius: 0.85
       always_send_full_costmap: true
       introspection_mode: "disabled"
 
@@ -200,8 +202,8 @@ global_costmap:
     ros__parameters:
       update_frequency: 1.0
       publish_frequency: 1.0
-      global_frame: "GLOBAL_FRAME"
-      robot_base_frame: "ROBOT_BASE_FRAME"
+      global_frame: "$(var global_frame)"
+      robot_base_frame: "$(var robot_base_frame)"
       transform_tolerance: 0.2
       resolution: 0.05
       track_unknown_space: true
@@ -213,8 +215,8 @@ global_costmap:
         map_subscribe_transient_local: true
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 2.0
+        inflation_radius: 0.85
       always_send_full_costmap: true
       introspection_mode: "disabled"
 
@@ -230,12 +232,12 @@ planner_server:
       tolerance: 0.5
       downsample_costmap: false
       downsampling_factor: 1
-      allow_unknown: true
+      allow_unknown: false
       max_iterations: 1000000
       max_on_approach_iterations: 1000
       terminal_checking_interval: 5000
       max_planning_time: 3.5
-      cost_travel_multiplier: 2.0
+      cost_travel_multiplier: 4.0
       use_final_approach_orientation: false
       smooth_path: true
       smoother:
@@ -268,9 +270,9 @@ behavior_server:
       minimum_speed: 0.10
     wait:
       plugin: "nav2_behaviors::Wait"
-    local_frame: "GLOBAL_FRAME"
-    global_frame: "GLOBAL_FRAME"
-    robot_base_frame: "ROBOT_BASE_FRAME"
+    local_frame: "$(var global_frame)"
+    global_frame: "$(var global_frame)"
+    robot_base_frame: "$(var robot_base_frame)"
     transform_tolerance: 0.2
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.0
@@ -297,3 +299,9 @@ lifecycle_manager:
     autostart: true
     bond_timeout: 4.0
     attempt_respawn_reconnection: true
+    node_names:
+      - planner_server
+      - controller_server
+      - behavior_server
+      - bt_navigator
+      - velocity_smoother

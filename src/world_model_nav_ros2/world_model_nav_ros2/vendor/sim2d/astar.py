@@ -69,6 +69,8 @@ def astar_search(
                 continue
             if occupancy[neighbor] != 0:
                 continue
+            if dr != 0 and dc != 0 and not _diagonal_move_is_clear(occupancy, current, dr, dc):
+                continue
             tentative_g = current_g + float(step_cost)
             if tentative_g >= g_score.get(neighbor, float("inf")):
                 continue
@@ -76,6 +78,18 @@ def astar_search(
             g_score[neighbor] = tentative_g
             heapq.heappush(open_heap, (tentative_g + heuristic(neighbor, goal_rc), tentative_g, neighbor))
     return None
+
+
+def _diagonal_move_is_clear(occupancy: np.ndarray, current: tuple[int, int], dr: int, dc: int) -> bool:
+    row, col = current
+    adjacent_a = (row + dr, col)
+    adjacent_b = (row, col + dc)
+    return (
+        in_bounds_rc(adjacent_a[0], adjacent_a[1], occupancy.shape)
+        and in_bounds_rc(adjacent_b[0], adjacent_b[1], occupancy.shape)
+        and occupancy[adjacent_a] == 0
+        and occupancy[adjacent_b] == 0
+    )
 
 
 def path_to_world(

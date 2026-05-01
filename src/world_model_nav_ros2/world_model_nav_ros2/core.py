@@ -28,7 +28,7 @@ class NavigationConfig:
     control_frequency: float = 10.0
     lookahead_distance: float = 1.0
     goal_tolerance: float = 0.4
-    robot_radius: float = 0.19
+    robot_radius: float = 0.4
     inflation_margin: float = 0.05
     map_occupied_threshold: int = 50
     treat_unknown_as_occupied: bool = True
@@ -143,6 +143,10 @@ class StepResult:
     message_level: str = "info"
     goal_reached: bool = False
     tracking_active: bool = False
+    selected_action_index: int | None = None
+    selected_action_name: str | None = None
+    chosen_action_min_clearance: float | None = None
+    pose_estimate_error: float | None = None
 
 
 @dataclass(frozen=True)
@@ -481,7 +485,6 @@ class WorldModelPolicyController:
         assert self.robot_pose is not None
         assert self.map_state is not None
         assert self.path_world is not None
-        assert self.tracked_waypoint is not None
 
         if self._reset_policy_pending:
             self.policy.reset(initial_pose=self.robot_pose.copy(), seed=int(self.nav_config.policy_seed))
@@ -514,10 +517,18 @@ class WorldModelPolicyController:
                 tracking_active=False,
             )
 
-        robot_pose_est = np.asarray(self.policy.current_pose_estimate(), dtype=float)
+        robot_pose_for_policy = self.robot_pose.copy()
+        waypoint = compute_local_subgoal(
+            robot_pose_for_policy,
+            self.path_world,
+            float(self.nav_config.lookahead_distance),
+        )
+        self.tracked_waypoint = np.asarray(waypoint["selected_subgoal_world"], dtype=float).reshape(2)
+        pose_estimate = np.asarray(self.policy.current_pose_estimate(), dtype=float)
+        pose_estimate_error = float(np.linalg.norm(pose_estimate[:2] - robot_pose_for_policy[:2]))
         try:
             decision = self.policy.select_action(
-                robot_pose=robot_pose_est,
+                robot_pose=robot_pose_for_policy,
                 current_subgoal_world=self.tracked_waypoint.copy(),
                 path_world=self.path_world,
                 planning_occupancy=self.map_state.planning_occupancy,
@@ -539,7 +550,7 @@ class WorldModelPolicyController:
         command = np.array([float(decision["v"]), float(decision["omega"])], dtype=np.float32)
         self._pending_commit = {
             "robot_pose_t": self.robot_pose.copy(),
-            "robot_pose_est_t": robot_pose_est.copy(),
+            "robot_pose_est_t": robot_pose_for_policy.copy(),
             "dynamic_obstacles_t": self._snapshot_obstacles(dynamic_obstacles),
             "action_index": int(decision["action_index"]),
             "action_cont": command.copy(),
@@ -549,6 +560,10 @@ class WorldModelPolicyController:
             command=command,
             subgoal_world=self.tracked_waypoint.copy(),
             tracking_active=True,
+            selected_action_index=int(decision["action_index"]),
+            selected_action_name=str(decision["action_name"]),
+            chosen_action_min_clearance=float(decision["chosen_action_min_clearance"]),
+            pose_estimate_error=pose_estimate_error,
         )
 
     def _clear_path(self) -> None:
@@ -562,8 +577,6 @@ class WorldModelPolicyController:
     def _readiness_error(self) -> str | None:
         if self.map_state is None or self.robot_pose is None:
             return "Waiting for map and odom before controlling."
-        if self.tracked_waypoint is None:
-            return "Waiting for tracked waypoint before controlling."
         if len(self.obstacle_tracker.obstacles) != int(self.nav_config.expected_dynamic_obstacles):
             return (
                 f"Waiting for {int(self.nav_config.expected_dynamic_obstacles)} dynamic obstacles; "

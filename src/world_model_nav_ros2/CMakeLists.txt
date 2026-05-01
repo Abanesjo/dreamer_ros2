@@ -10,6 +10,7 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
@@ -18,6 +19,7 @@ install(PROGRAMS
   scripts/astar_planner_node.py
   scripts/waypoint_tracker_node.py
   scripts/policy_controller_node.py
+  scripts/map_image_publisher_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -22,4 +22,10 @@
     <param name="frame_id" value="$(var frame_id)"/>
     <param name="policy_path" value="$(var policy_path)"/>
   </node>
+
+  <node pkg="world_model_nav_ros2" exec="map_image_publisher_node.py" name="world_model_nav_map_image_publisher" output="screen">
+    <param from="$(var params_file)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="frame_id" value="$(var frame_id)"/>
+  </node>
 </launch>

@@ -12,17 +12,21 @@
     subgoal_topic: /world_model_nav/subgoal
     tracked_waypoint_topic: /world_model_nav/tracked_waypoint
     robot_marker_topic: /world_model_nav/robot_footprint
+    map_image_topic: /map_image
 
     control_frequency: 10.0
     waypoint_frequency: 10.0
     path_republish_frequency: 1.0
+    map_image_frequency: 5.0
+    map_image_figure_size: [8.0, 8.0]
+    map_image_dpi: 120
     policy_path: ""
     device: auto
     policy_seed: 0
 
     lookahead_distance: 1.0
     goal_tolerance: 0.4
-    robot_radius: 0.19
+    robot_radius: 0.4
     robot_marker_segments: 64
     robot_marker_line_width: 0.04
     inflation_margin: 0.05

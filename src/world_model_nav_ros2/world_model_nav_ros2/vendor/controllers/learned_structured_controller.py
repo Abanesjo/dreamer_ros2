@@ -269,6 +269,9 @@ class LearnedStructuredController:
             sigma_obs_y=float(self.controller_cfg.sigma_obs_y),
             sigma_obs_theta=float(self.controller_cfg.sigma_obs_theta),
         )
+        if not bool(self.controller_cfg.pose_observation_noise_enabled):
+            self.ekf.mean = _wrap_pose_theta(np.asarray(pose_observation, dtype=float))
+            self.ekf.covariance = np.zeros((3, 3), dtype=float)
         robot_pose_est_t1 = self.current_pose_estimate()
         self.last_ekf_debug = {
             "estimated_pose_mean": robot_pose_est_t1.copy().tolist(),

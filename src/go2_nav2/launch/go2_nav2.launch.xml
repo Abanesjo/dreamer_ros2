@@ -1,0 +1,70 @@
+<launch>
+  <arg name="use_sim_time" default="true" description="Use simulation time."/>
+  <arg name="params_file" default="$(find-pkg-share go2_nav2)/config/go2_nav2_params.yaml" description="Full path to the ROS 2 parameters file."/>
+  <arg name="global_frame" default="odom" description="Nav2 global frame. The Dreamer map is published in odom."/>
+  <arg name="robot_base_frame" default="base" description="Robot base TF frame. Override to base_link if the simulator uses base_link."/>
+  <arg name="cloud_topic" default="/cloud" description="Input point cloud topic to project into a laser scan."/>
+  <arg name="scan_topic" default="/scan" description="Laser scan topic produced from the point cloud."/>
+  <arg name="goal_topic" default="/goal_pose" description="PoseStamped topic accepted by Nav2 BT navigator."/>
+  <arg name="cmd_vel_topic" default="/cmd_vel" description="Final smoothed velocity command topic for go2_controller."/>
+
+  <set_env name="RCUTILS_LOGGING_BUFFERED_STREAM" value="1"/>
+  <set_parameter name="use_sim_time" value="$(var use_sim_time)"/>
+
+  <node pkg="pointcloud_to_laserscan" exec="pointcloud_to_laserscan_node" name="pointcloud_to_laserscan" output="screen">
+    <param name="target_frame" value="$(var robot_base_frame)"/>
+    <param name="transform_tolerance" value="0.05"/>
+    <param name="min_height" value="-0.25"/>
+    <param name="max_height" value="1.20"/>
+    <param name="angle_min" value="-3.14159"/>
+    <param name="angle_max" value="3.14159"/>
+    <param name="angle_increment" value="0.0087"/>
+    <param name="scan_time" value="0.1"/>
+    <param name="range_min" value="0.10"/>
+    <param name="range_max" value="8.0"/>
+    <param name="use_inf" value="true"/>
+    <remap from="/tf" to="tf"/>
+    <remap from="/tf_static" to="tf_static"/>
+    <remap from="cloud_in" to="$(var cloud_topic)"/>
+    <remap from="scan" to="$(var scan_topic)"/>
+  </node>
+
+  <node pkg="nav2_planner" exec="planner_server" name="planner_server" output="screen">
+    <param from="$(var params_file)" allow_substs="true"/>
+    <remap from="/tf" to="tf"/>
+    <remap from="/tf_static" to="tf_static"/>
+  </node>
+
+  <node pkg="nav2_controller" exec="controller_server" name="controller_server" output="screen">
+    <param from="$(var params_file)" allow_substs="true"/>
+    <remap from="/tf" to="tf"/>
+    <remap from="/tf_static" to="tf_static"/>
+    <remap from="cmd_vel" to="/cmd_vel_nav"/>
+  </node>
+
+  <node pkg="nav2_behaviors" exec="behavior_server" name="behavior_server" output="screen">
+    <param from="$(var params_file)" allow_substs="true"/>
+    <remap from="/tf" to="tf"/>
+    <remap from="/tf_static" to="tf_static"/>
+    <remap from="cmd_vel" to="/cmd_vel_nav"/>
+  </node>
+
+  <node pkg="nav2_bt_navigator" exec="bt_navigator" name="bt_navigator" output="screen">
+    <param from="$(var params_file)" allow_substs="true"/>
+    <remap from="/tf" to="tf"/>
+    <remap from="/tf_static" to="tf_static"/>
+    <remap from="goal_pose" to="$(var goal_topic)"/>
+  </node>
+
+  <node pkg="nav2_velocity_smoother" exec="velocity_smoother" name="velocity_smoother" output="screen">
+    <param from="$(var params_file)" allow_substs="true"/>
+    <remap from="/tf" to="tf"/>
+    <remap from="/tf_static" to="tf_static"/>
+    <remap from="cmd_vel" to="/cmd_vel_nav"/>
+    <remap from="cmd_vel_smoothed" to="$(var cmd_vel_topic)"/>
+  </node>
+
+  <node pkg="nav2_lifecycle_manager" exec="lifecycle_manager" name="lifecycle_manager" output="screen">
+    <param from="$(var params_file)" allow_substs="true"/>
+  </node>
+</launch>

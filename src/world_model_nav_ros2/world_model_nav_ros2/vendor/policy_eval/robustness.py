@@ -155,6 +155,18 @@ class RobotPoseEKF:
             observation_cov = np.diag([1e-9, 1e-9, 1e-9])
         innovation = observation - self.mean
         innovation[2] = wrap_angle(float(innovation[2]))
+        if not pose_observation_noise_enabled:
+            self.mean = observation.copy()
+            self.covariance = np.zeros((3, 3), dtype=float)
+            return {
+                "observation": observation.copy(),
+                "observation_covariance": observation_cov,
+                "innovation": innovation,
+                "innovation_covariance": observation_cov.copy(),
+                "kalman_gain": np.eye(3, dtype=float),
+                "corrected_mean": self.mean.copy(),
+                "corrected_covariance": self.covariance.copy(),
+            }
         innovation_cov = self.covariance + observation_cov
         kalman_gain = self.covariance @ np.linalg.inv(innovation_cov)
         updated_mean = self.mean + kalman_gain @ innovation
