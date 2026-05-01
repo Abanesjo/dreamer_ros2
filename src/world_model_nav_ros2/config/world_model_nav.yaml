@@ -12,6 +12,7 @@
     subgoal_topic: /world_model_nav/subgoal
     tracked_waypoint_topic: /world_model_nav/tracked_waypoint
     robot_marker_topic: /world_model_nav/robot_footprint
+    policy_debug_topic: /world_model_nav/policy_debug
     map_image_topic: /map_image
 
     control_frequency: 10.0

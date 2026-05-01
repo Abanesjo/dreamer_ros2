@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -16,6 +17,7 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from world_model_nav_ros2.ros_utils import (
@@ -52,6 +54,7 @@ class MapImagePublisherNode(Node):
         self.dynamic_obstacles_topic = str(self.get_parameter("dynamic_obstacles_topic").value)
         self.path_topic = str(self.get_parameter("path_topic").value)
         self.tracked_waypoint_topic = str(self.get_parameter("tracked_waypoint_topic").value)
+        self.policy_debug_topic = str(self.get_parameter("policy_debug_topic").value)
         self.map_image_topic = str(self.get_parameter("map_image_topic").value)
         self.publish_frequency = float(self.get_parameter("map_image_frequency").value)
         self.figure_size = self._figure_size_parameter("map_image_figure_size")
@@ -66,6 +69,7 @@ class MapImagePublisherNode(Node):
         self._path_world: np.ndarray | None = None
         self._tracked_waypoint: np.ndarray | None = None
         self._obstacles: list[RenderedObstacle] = []
+        self._policy_title = "World-Model-Nav | waiting for policy debug"
         self._warned_frames: set[str] = set()
         self._warn_last_time: dict[str, float] = {}
 
@@ -94,13 +98,20 @@ class MapImagePublisherNode(Node):
             self._on_tracked_waypoint,
             default_qos(),
         )
+        self.policy_debug_sub = self.create_subscription(
+            String,
+            self.policy_debug_topic,
+            self._on_policy_debug,
+            default_qos(),
+        )
         self.image_pub = self.create_publisher(Image, self.map_image_topic, default_qos(depth=1))
         self.timer = self.create_timer(1.0 / max(self.publish_frequency, 1e-6), self._on_timer)
 
         self.get_logger().info(
             "Map image publisher ready: "
             f"map={self.map_topic}, odom={self.odom_topic}, obstacles={self.dynamic_obstacles_topic}, "
-            f"path={self.path_topic}, tracked={self.tracked_waypoint_topic}, image={self.map_image_topic}"
+            f"path={self.path_topic}, tracked={self.tracked_waypoint_topic}, "
+            f"debug={self.policy_debug_topic}, image={self.map_image_topic}"
         )
 
     def _declare_parameters(self) -> None:
@@ -110,6 +121,7 @@ class MapImagePublisherNode(Node):
         self.declare_parameter("dynamic_obstacles_topic", "/dynamic_obstacles")
         self.declare_parameter("path_topic", "/path")
         self.declare_parameter("tracked_waypoint_topic", "/world_model_nav/tracked_waypoint")
+        self.declare_parameter("policy_debug_topic", "/world_model_nav/policy_debug")
         self.declare_parameter("map_image_topic", "/map_image")
         self.declare_parameter("map_image_frequency", 5.0)
         self.declare_parameter("map_image_figure_size", [8.0, 8.0])
@@ -198,6 +210,14 @@ class MapImagePublisherNode(Node):
         if obstacles or saw_delete_all:
             self._obstacles = obstacles
 
+    def _on_policy_debug(self, msg: String) -> None:
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self._policy_title = f"World-Model-Nav | {msg.data}"
+            return
+        self._policy_title = self._format_policy_title(payload)
+
     def _on_timer(self) -> None:
         if self._map is None:
             self._warn_throttled(f"Waiting for {self.map_topic} before publishing {self.map_image_topic}.")
@@ -227,6 +247,7 @@ class MapImagePublisherNode(Node):
             for obstacle in self._obstacles:
                 self._draw_dynamic_obstacle(ax, obstacle)
 
+            ax.set_title(self._policy_title)
             ax.set_xlabel("x [m]")
             ax.set_ylabel("y [m]")
             ax.set_aspect("equal")
@@ -278,6 +299,30 @@ class MapImagePublisherNode(Node):
             alpha=0.45,
         )
         ax.add_patch(circle)
+
+    def _format_policy_title(self, payload: dict[str, object]) -> str:
+        action = str(payload.get("action", "unknown"))
+        selection = str(payload.get("selection_mode", ""))
+        clearance = self._format_optional_float(payload.get("min_clearance"), precision=3)
+        pose_error = self._format_optional_float(payload.get("pose_estimate_error"), precision=3)
+        feasible_non_stop = payload.get("num_feasible_non_stop", "?")
+        feasible_all = payload.get("num_feasible_all", "?")
+        obstacles = payload.get("obstacle_count", "?")
+        reasons = payload.get("reasons", [])
+        reason_text = ",".join(str(reason) for reason in reasons) if reasons else "none"
+        return (
+            f"World-Model-Nav | action={action} | {selection} | "
+            f"clearance={clearance}m | pose_err={pose_error}m | "
+            f"feasible={feasible_non_stop}/{feasible_all} | obstacles={obstacles} | reasons={reason_text}"
+        )
+
+    def _format_optional_float(self, value: object, *, precision: int) -> str:
+        if value is None:
+            return "nan"
+        try:
+            return f"{float(value):.{precision}f}"
+        except (TypeError, ValueError):
+            return "nan"
 
     def _marker_radius(self, marker: Marker, center: np.ndarray) -> float:
         if marker.points:

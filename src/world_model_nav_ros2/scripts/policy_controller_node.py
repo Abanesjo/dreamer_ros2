@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import math
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, PoseStamped, Twist
 from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from rclpy.node import Node
+from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from world_model_nav_ros2.core import (
@@ -41,6 +43,7 @@ class PolicyControllerNode(Node):
         self.tracked_waypoint_topic = str(self.get_parameter("tracked_waypoint_topic").value)
         self.cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self.robot_marker_topic = str(self.get_parameter("robot_marker_topic").value)
+        self.policy_debug_topic = str(self.get_parameter("policy_debug_topic").value)
         self.control_frequency = float(self.get_parameter("control_frequency").value)
         configured_policy_path = str(self.get_parameter("policy_path").value)
         self.robot_radius = float(self.get_parameter("robot_radius").value)
@@ -129,12 +132,14 @@ class PolicyControllerNode(Node):
         )
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, default_qos())
         self.robot_marker_pub = self.create_publisher(Marker, self.robot_marker_topic, default_qos())
+        self.policy_debug_pub = self.create_publisher(String, self.policy_debug_topic, default_qos())
 
         self.timer = self.create_timer(1.0 / max(self.control_frequency, 1e-6), self._on_timer)
         self.get_logger().info(
             "Policy controller ready: "
             f"policy={nav_config.policy_path}, path={self.path_topic}, "
-            f"tracked={self.tracked_waypoint_topic}, cmd={self.cmd_vel_topic}"
+            f"tracked={self.tracked_waypoint_topic}, cmd={self.cmd_vel_topic}, "
+            f"debug={self.policy_debug_topic}"
         )
 
     def _declare_parameters(self) -> None:
@@ -146,6 +151,7 @@ class PolicyControllerNode(Node):
         self.declare_parameter("tracked_waypoint_topic", "/world_model_nav/tracked_waypoint")
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("robot_marker_topic", "/world_model_nav/robot_footprint")
+        self.declare_parameter("policy_debug_topic", "/world_model_nav/policy_debug")
         self.declare_parameter("control_frequency", 10.0)
         self.declare_parameter("policy_path", default_policy_path())
         self.declare_parameter("device", "auto")
@@ -247,7 +253,7 @@ class PolicyControllerNode(Node):
         result = self.controller.step()
         self._publish_cmd(result.command)
         self._log_step_message(result)
-        self._log_step_debug(result)
+        self._publish_policy_debug(result)
 
     def _publish_cmd(self, command: np.ndarray) -> None:
         msg = Twist()
@@ -294,32 +300,32 @@ class PolicyControllerNode(Node):
         else:
             self.get_logger().info(result.message)
 
-    def _log_step_debug(self, result: StepResult) -> None:
+    def _publish_policy_debug(self, result: StepResult) -> None:
         if result.selected_action_name is None:
             return
-        min_clearance = (
-            "nan"
-            if result.chosen_action_min_clearance is None
-            else f"{float(result.chosen_action_min_clearance):.3f}"
+        msg = String()
+        msg.data = json.dumps(
+            {
+                "action": str(result.selected_action_name),
+                "v": float(result.command[0]),
+                "omega": float(result.command[1]),
+                "min_clearance": (
+                    None
+                    if result.chosen_action_min_clearance is None
+                    else float(result.chosen_action_min_clearance)
+                ),
+                "pose_estimate_error": (
+                    None if result.pose_estimate_error is None else float(result.pose_estimate_error)
+                ),
+                "selection_mode": result.selection_mode,
+                "num_feasible_non_stop": result.num_feasible_non_stop,
+                "num_feasible_all": result.num_feasible_all,
+                "obstacle_count": result.obstacle_count,
+                "reasons": list(result.chosen_infeasible_reasons),
+            },
+            sort_keys=True,
         )
-        pose_error = (
-            "nan"
-            if result.pose_estimate_error is None
-            else f"{float(result.pose_estimate_error):.3f}"
-        )
-        self._info_throttled(
-            "policy_debug",
-            "Policy debug: "
-            f"action={result.selected_action_name}, "
-            f"cmd=({float(result.command[0]):.2f}, {float(result.command[1]):.2f}), "
-            f"min_clearance={min_clearance} m, "
-            f"pose_estimate_error={pose_error} m, "
-            f"selection={result.selection_mode}, "
-            f"feasible_non_stop={result.num_feasible_non_stop}, "
-            f"feasible_all={result.num_feasible_all}, "
-            f"obstacles={result.obstacle_count}, "
-            f"reasons={list(result.chosen_infeasible_reasons)}",
-        )
+        self.policy_debug_pub.publish(msg)
 
     def _warn_throttled(self, message: str, period: float = 2.0) -> None:
         now = self.get_clock().now().nanoseconds * 1e-9
