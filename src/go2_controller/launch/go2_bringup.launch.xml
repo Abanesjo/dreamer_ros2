@@ -12,8 +12,4 @@
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="robot_description" value="$(command 'cat $(var urdf_file)')"/>
   </node>
-
-  <node pkg="foxglove_bridge" exec="foxglove_bridge" name="foxglove_bridge" output="screen">
-    <param name="use_sim_time" value="$(var use_sim_time)"/>
-  </node>
 </launch>
