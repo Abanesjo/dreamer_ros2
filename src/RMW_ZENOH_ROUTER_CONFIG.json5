@@ -8,9 +8,7 @@
   connect: {
     timeout_ms: { router: -1, peer: -1, client: 0 },
 
-    endpoints: [
-      "tcp/192.168.123.3:7447"
-    ],
+    endpoints: [],
 
     exit_on_failure: { router: false, peer: false, client: true },
 
