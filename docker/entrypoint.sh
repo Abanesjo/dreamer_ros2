@@ -8,8 +8,11 @@ rosdep install --from-path src --ignore-src -r -y
 colcon build --symlink-install
 
 echo "source /workspace/ros2_ws/install/setup.bash" >> ~/.bashrc
-echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
-echo "export CYCLONEDDS_URI=file:///workspace/ros2_ws/src/cyclonedds.xml" >> ~/.bashrc
+# echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
+# echo "export CYCLONEDDS_URI=file:///workspace/ros2_ws/src/cyclonedds.xml" >> ~/.bashrc
+
+echo 'export RMW_IMPLEMENTATION="rmw_zenoh_cpp"' >> ~/.bashrc
+echo 'export ZENOH_ROUTER_CONFIG_URI="/workspace/ros2_ws/src/RMW_ZENOH_ROUTER_CONFIG.json5' >> ~/.bashrc
 
 source /workspace/ros2_ws/install/setup.bash
 

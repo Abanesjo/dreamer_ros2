@@ -11,6 +11,7 @@ RUN apt install ros-jazzy-desktop -y
 
 RUN apt install -y \
     ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-rmw-zenoh-cpp \ 
     ros-jazzy-rosidl-generator-dds-idl \
     ros-jazzy-rosbag2-cpp \
     ros-jazzy-vision-msgs \
