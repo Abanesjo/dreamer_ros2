@@ -1,18 +1,12 @@
 #!/bin/bash
+set -e
 
 source /opt/ros/jazzy/setup.bash
 
 cd /workspace/ros2_ws
 
-rosdep install --from-path src --ignore-src -r -y
+rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
-
-echo "source /workspace/ros2_ws/install/setup.bash" >> ~/.bashrc
-# echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
-# echo "export CYCLONEDDS_URI=file:///workspace/ros2_ws/src/cyclonedds.xml" >> ~/.bashrc
-
-echo 'export RMW_IMPLEMENTATION="rmw_zenoh_cpp"' >> ~/.bashrc
-echo 'export ZENOH_ROUTER_CONFIG_URI="/workspace/ros2_ws/src/RMW_ZENOH_ROUTER_CONFIG.json5"' >> ~/.bashrc
 
 source /workspace/ros2_ws/install/setup.bash
 
@@ -22,12 +16,10 @@ grep -qxF "source /opt/ros/jazzy/setup.bash" ~/.bashrc || \
 grep -qxF "source /workspace/ros2_ws/install/setup.bash" ~/.bashrc || \
     echo "source /workspace/ros2_ws/install/setup.bash" >> ~/.bashrc
 
-grep -qxF "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" ~/.bashrc || \
-    echo "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" >> ~/.bashrc
+grep -qxF 'export RMW_IMPLEMENTATION="rmw_zenoh_cpp"' ~/.bashrc || \
+    echo 'export RMW_IMPLEMENTATION="rmw_zenoh_cpp"' >> ~/.bashrc
 
-grep -qxF "export CYCLONEDDS_URI=file:///workspace/ros2_ws/src/cyclonedds.xml" ~/.bashrc || \
-    echo "export CYCLONEDDS_URI=file:///workspace/ros2_ws/src/cyclonedds.xml" >> ~/.bashrc
-
-cd /workspace/ros2_ws
+grep -qxF 'export ZENOH_ROUTER_CONFIG_URI="/workspace/ros2_ws/src/RMW_ZENOH_ROUTER_CONFIG.json5"' ~/.bashrc || \
+    echo 'export ZENOH_ROUTER_CONFIG_URI="/workspace/ros2_ws/src/RMW_ZENOH_ROUTER_CONFIG.json5"' >> ~/.bashrc
 
 exec bash
