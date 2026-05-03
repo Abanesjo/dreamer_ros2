@@ -3,8 +3,7 @@
   <arg name="params_file" default="$(find-pkg-share go2_nav2)/config/go2_nav2_dwb_params.yaml" description="Full path to the DWB ROS 2 parameters file."/>
   <arg name="global_frame" default="odom" description="Nav2 global frame. The Dreamer map is published in odom."/>
   <arg name="robot_base_frame" default="base" description="Robot base TF frame. Override to base_link if the simulator uses base_link."/>
-  <arg name="cloud_topic" default="/cloud" description="Input point cloud topic to project into a laser scan."/>
-  <arg name="scan_topic" default="/scan" description="Laser scan topic produced from the point cloud."/>
+  <arg name="scan_topic" default="/scan" description="Laser scan topic consumed by Nav2."/>
   <arg name="goal_topic" default="/goal_pose" description="PoseStamped topic accepted by Nav2 BT navigator."/>
   <arg name="cmd_vel_topic" default="/cmd_vel" description="Final smoothed velocity command topic for go2_controller."/>
 
@@ -13,7 +12,6 @@
     <arg name="params_file" value="$(var params_file)"/>
     <arg name="global_frame" value="$(var global_frame)"/>
     <arg name="robot_base_frame" value="$(var robot_base_frame)"/>
-    <arg name="cloud_topic" value="$(var cloud_topic)"/>
     <arg name="scan_topic" value="$(var scan_topic)"/>
     <arg name="goal_topic" value="$(var goal_topic)"/>
     <arg name="cmd_vel_topic" value="$(var cmd_vel_topic)"/>

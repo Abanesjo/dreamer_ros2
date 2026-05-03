@@ -88,31 +88,24 @@ controller_server:
       angular_granularity: 0.025
       transform_tolerance: 0.2
       trans_stopped_velocity: 0.05
-      short_circuit_trajectory_evaluation: true
+      short_circuit_trajectory_evaluation: false
       stateful: true
       critics:
         [
           "RotateToGoal",
-          "Oscillation",
           "BaseObstacle",
-          "PreferForward",
           "GoalAlign",
           "PathAlign",
           "PathDist",
           "GoalDist",
         ]
-      BaseObstacle.scale: 0.02
-      PreferForward.scale: 8.0
-      PreferForward.penalty: 2.0
-      PreferForward.strafe_x: 0.05
-      PreferForward.strafe_theta: 0.2
-      PreferForward.theta_scale: 5.0
-      GoalAlign.scale: 24.0
+      BaseObstacle.scale: 0.25
+      GoalAlign.scale: 2.0
       GoalAlign.forward_point_distance: 0.1
-      PathAlign.scale: 32.0
+      PathAlign.scale: 2.0
       PathAlign.forward_point_distance: 0.1
-      PathDist.scale: 32.0
-      GoalDist.scale: 24.0
+      PathDist.scale: 4.0
+      GoalDist.scale: 6.0
       RotateToGoal.scale: 32.0
       RotateToGoal.slowing_factor: 5.0
       RotateToGoal.lookahead_time: -1.0
@@ -154,7 +147,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.0
-        inflation_radius: 0.85
+        inflation_radius: 0.90
       always_send_full_costmap: true
       introspection_mode: "disabled"
 
@@ -177,7 +170,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.0
-        inflation_radius: 0.85
+        inflation_radius: 0.60
       always_send_full_costmap: true
       introspection_mode: "disabled"
 
