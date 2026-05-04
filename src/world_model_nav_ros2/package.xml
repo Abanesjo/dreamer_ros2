@@ -10,6 +10,7 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>geometry_msgs</depend>
+  <depend>go2_nav2</depend>
   <depend>nav_msgs</depend>
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>

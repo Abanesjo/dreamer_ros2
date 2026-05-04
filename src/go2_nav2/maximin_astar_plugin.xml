@@ -1,0 +1,5 @@
+<library path="go2_nav2_maximin_astar">
+  <class type="go2_nav2::MaximinAStarPlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Maximin-clearance 2D A* planner for center-biased paths.</description>
+  </class>
+</library>

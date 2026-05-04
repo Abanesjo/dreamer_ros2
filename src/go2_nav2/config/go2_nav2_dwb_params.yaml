@@ -182,24 +182,10 @@ planner_server:
     planner_plugins: ["GridBased"]
     introspection_mode: "disabled"
     GridBased:
-      plugin: "nav2_smac_planner::SmacPlanner2D"
+      plugin: "go2_nav2::MaximinAStarPlanner"
       tolerance: 0.5
-      downsample_costmap: false
-      downsampling_factor: 1
       allow_unknown: false
-      max_iterations: 1000000
-      max_on_approach_iterations: 1000
-      terminal_checking_interval: 5000
-      max_planning_time: 3.5
-      cost_travel_multiplier: 4.0
       use_final_approach_orientation: false
-      smooth_path: true
-      smoother:
-        max_iterations: 1000
-        w_smooth: 0.3
-        w_data: 0.2
-        tolerance: 1.0e-10
-        do_refinement: true
 
 behavior_server:
   ros__parameters:
