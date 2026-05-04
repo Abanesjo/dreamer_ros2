@@ -69,6 +69,7 @@ class MapImagePublisherNode(Node):
         self._path_world: np.ndarray | None = None
         self._tracked_waypoint: np.ndarray | None = None
         self._obstacles: list[RenderedObstacle] = []
+        self._visualization: dict[str, object] = {}
         self._policy_title = "World-Model-Nav | waiting for policy debug"
         self._warned_frames: set[str] = set()
         self._warn_last_time: dict[str, float] = {}
@@ -216,8 +217,11 @@ class MapImagePublisherNode(Node):
             payload = json.loads(msg.data)
         except json.JSONDecodeError:
             self._policy_title = f"World-Model-Nav | {msg.data}"
+            self._visualization = {}
             return
         self._policy_title = self._format_policy_title(payload)
+        visualization = payload.get("visualization", {})
+        self._visualization = visualization if isinstance(visualization, dict) else {}
 
     def _on_timer(self) -> None:
         if self._map is None:
@@ -235,6 +239,8 @@ class MapImagePublisherNode(Node):
             self._draw_map(ax, self._map)
             if self._path_world is not None and len(self._path_world):
                 ax.plot(self._path_world[:, 0], self._path_world[:, 1], color="tab:cyan", linewidth=1.2)
+            self._draw_rollout_overlays(ax)
+            self._draw_predicted_obstacle_overlays(ax)
             if self._robot_pose is not None:
                 self._draw_robot(ax, self._robot_pose)
             if self._tracked_waypoint is not None:
@@ -301,6 +307,55 @@ class MapImagePublisherNode(Node):
         )
         ax.add_patch(circle)
 
+    def _draw_rollout_overlays(self, ax: plt.Axes) -> None:
+        rollouts = self._visualization.get("rollouts", [])
+        if not isinstance(rollouts, list):
+            return
+        score_range = self._score_range(rollouts)
+        for rollout in rollouts:
+            if not isinstance(rollout, dict):
+                continue
+            points = self._xy_array(rollout.get("points", []))
+            if points is None or len(points) < 2:
+                continue
+            selected = bool(rollout.get("selected", False))
+            ax.plot(
+                points[:, 0],
+                points[:, 1],
+                color=self._score_color(rollout.get("score"), score_range),
+                linewidth=2.2 if selected else 1.1,
+                alpha=0.95 if selected else 0.65,
+                zorder=3,
+            )
+
+    def _draw_predicted_obstacle_overlays(self, ax: plt.Axes) -> None:
+        predictions = self._visualization.get("selected_dynamic_obstacle_predictions", {})
+        if not isinstance(predictions, dict):
+            return
+        raw_steps = predictions.get("positions", [])
+        if not isinstance(raw_steps, list):
+            return
+        radius = self._positive_float(predictions.get("radius"), default=self.dynamic_obstacle_radius)
+        horizon = max(1, len(raw_steps))
+        for step_index, raw_step in enumerate(raw_steps):
+            if not isinstance(raw_step, list):
+                continue
+            alpha = max(0.25, 0.8 - 0.45 * (float(step_index) / float(horizon)))
+            for raw_position in raw_step:
+                center = self._xy_tuple(raw_position)
+                if center is None:
+                    continue
+                circle = plt.Circle(
+                    center,
+                    radius=radius,
+                    color=(0.55, 0.15, 0.95),
+                    fill=False,
+                    alpha=alpha,
+                    linewidth=1.0,
+                    zorder=4,
+                )
+                ax.add_patch(circle)
+
     def _format_policy_title(self, payload: dict[str, object]) -> str:
         action = str(payload.get("action", "unknown"))
         selection = str(payload.get("selection_mode", ""))
@@ -332,6 +387,66 @@ class MapImagePublisherNode(Node):
     def _marker_radius(self, marker: Marker, center: np.ndarray) -> float:
         del marker, center
         return self.dynamic_obstacle_radius
+
+    def _xy_array(self, values: object) -> np.ndarray | None:
+        if not isinstance(values, list):
+            return None
+        points: list[tuple[float, float]] = []
+        for value in values:
+            xy = self._xy_tuple(value)
+            if xy is not None:
+                points.append(xy)
+        if not points:
+            return None
+        return np.asarray(points, dtype=float)
+
+    def _xy_tuple(self, value: object) -> tuple[float, float] | None:
+        try:
+            xy = np.asarray(value, dtype=float).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        if xy.size < 2 or not np.all(np.isfinite(xy[:2])):
+            return None
+        return (float(xy[0]), float(xy[1]))
+
+    def _score_range(self, rollouts: list[object]) -> tuple[float, float] | None:
+        scores: list[float] = []
+        for rollout in rollouts:
+            if not isinstance(rollout, dict):
+                continue
+            try:
+                score = float(rollout.get("score"))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(score):
+                scores.append(score)
+        if not scores:
+            return None
+        return (min(scores), max(scores))
+
+    def _score_color(
+        self,
+        raw_score: object,
+        score_range: tuple[float, float] | None,
+    ) -> tuple[float, float, float]:
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            return (1.0, 0.0, 0.0)
+        if score_range is None or not np.isfinite(score):
+            return (1.0, 0.0, 0.0)
+        min_score, max_score = score_range
+        if max_score <= min_score:
+            return (0.0, 1.0, 0.0)
+        ratio = min(1.0, max(0.0, (score - min_score) / (max_score - min_score)))
+        return (ratio, 1.0 - ratio, 0.0)
+
+    def _positive_float(self, value: object, *, default: float) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        return number if number > 0.0 and np.isfinite(number) else float(default)
 
     def _image_msg(self, rgb: np.ndarray, *, frame_id: str) -> Image:
         msg = Image()

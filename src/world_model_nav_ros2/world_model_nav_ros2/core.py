@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -40,6 +41,7 @@ class NavigationConfig:
     map_occupied_threshold: int = 50
     treat_unknown_as_occupied: bool = True
     dynamic_obstacle_radius: float = 1.0
+    visual_dynamic_obstacle_radius: float = 0.5
     expected_dynamic_obstacles: int = 4
     min_obstacle_dt: float = 1e-3
     dynamic_obstacle_stale_timeout: float = 1.0
@@ -164,6 +166,7 @@ class StepResult:
     num_feasible_all: int | None = None
     obstacle_count: int | None = None
     chosen_infeasible_reasons: tuple[str, ...] = ()
+    visualization: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -605,6 +608,11 @@ class WorldModelPolicyController:
             "action_cont": np.asarray(decision.get("action_cont", command), dtype=np.float32).copy(),
             "path_world": self.path_world.copy(),
         }
+        visualization = self._build_visualization_payload(
+            initial_robot_pose=robot_pose_for_policy,
+            decision=decision,
+            dynamic_obstacles=dynamic_obstacles,
+        )
         return StepResult(
             command=command,
             subgoal_world=self.tracked_waypoint.copy(),
@@ -618,6 +626,7 @@ class WorldModelPolicyController:
             num_feasible_all=int(decision_debug.get("num_feasible_all", 0)),
             obstacle_count=len(dynamic_obstacles),
             chosen_infeasible_reasons=tuple(str(reason) for reason in chosen_debug.get("infeasible_reasons", [])),
+            visualization=visualization,
         )
 
     def _clear_path(self) -> None:
@@ -662,3 +671,106 @@ class WorldModelPolicyController:
         obstacles: list[RuntimeDynamicObstacle],
     ) -> list[dict[str, object]]:
         return [obstacle.snapshot() for obstacle in obstacles]
+
+    def _build_visualization_payload(
+        self,
+        *,
+        initial_robot_pose: np.ndarray,
+        decision: dict[str, object],
+        dynamic_obstacles: list[RuntimeDynamicObstacle],
+    ) -> dict[str, Any]:
+        debug = dict(decision.get("debug", {}))
+        raw_candidates = debug.get("candidates", [])
+        candidates = raw_candidates if isinstance(raw_candidates, list) else []
+        selected_action_index = int(decision.get("action_index", -1))
+        initial_pose = self._pose_list(initial_robot_pose)
+        rollouts: list[dict[str, Any]] = []
+        selected_candidate: dict[str, Any] | None = None
+        chosen = debug.get("chosen", {})
+        if isinstance(chosen, dict):
+            selected_candidate = chosen
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            action_index = int(candidate.get("action_index", -1))
+            points = [initial_pose]
+            points.extend(self._pose_list(point) for point in self._sequence(candidate.get("robot_rollout_world", [])))
+            if len(points) < 2:
+                continue
+            is_selected = action_index == selected_action_index
+            if is_selected:
+                selected_candidate = candidate
+            rollouts.append(
+                {
+                    "action_index": action_index,
+                    "action_name": str(candidate.get("action_name", "")),
+                    "score": self._finite_float_or_none(candidate.get("total_cost")),
+                    "feasible": bool(candidate.get("feasible", False)),
+                    "selected": bool(is_selected),
+                    "points": points,
+                }
+            )
+
+        if selected_candidate is None:
+            selected_candidate = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if isinstance(candidate, dict)
+                    and int(candidate.get("action_index", -1)) == selected_action_index
+                ),
+                {},
+            )
+
+        prediction_steps = self._prediction_steps(selected_candidate or {})
+        return {
+            "rollouts": rollouts,
+            "selected_dynamic_obstacle_predictions": {
+                "obstacle_ids": [str(obstacle.obstacle_id) for obstacle in dynamic_obstacles],
+                "radius": float(self.nav_config.visual_dynamic_obstacle_radius),
+                "positions": prediction_steps,
+            },
+        }
+
+    def _prediction_steps(self, candidate: dict[str, Any]) -> list[list[list[float]]]:
+        raw_steps = candidate.get("predicted_positions_world")
+        if raw_steps is None:
+            raw_steps = candidate.get("dynamic_positions_world")
+        steps: list[list[list[float]]] = []
+        for raw_step in self._sequence(raw_steps):
+            positions: list[list[float]] = []
+            for raw_position in self._sequence(raw_step):
+                point = np.asarray(raw_position, dtype=float).reshape(-1)
+                if point.size >= 2 and np.all(np.isfinite(point[:2])):
+                    positions.append([float(point[0]), float(point[1])])
+            if positions:
+                steps.append(positions)
+        return steps
+
+    @staticmethod
+    def _sequence(value: object) -> list[object]:
+        if value is None:
+            return []
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return []
+
+    @staticmethod
+    def _pose_list(value: object) -> list[float]:
+        pose = np.asarray(value, dtype=float).reshape(-1)
+        if pose.size < 3:
+            padded = np.zeros((3,), dtype=float)
+            padded[: pose.size] = pose
+            pose = padded
+        return [float(pose[0]), float(pose[1]), float(pose[2])]
+
+    @staticmethod
+    def _finite_float_or_none(value: object) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if np.isfinite(number) else None

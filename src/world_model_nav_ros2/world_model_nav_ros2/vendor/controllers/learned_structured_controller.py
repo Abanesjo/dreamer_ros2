@@ -73,6 +73,15 @@ def detach_hidden_state(hidden):
     raise TypeError(f"Unsupported hidden state type: {type(hidden)!r}")
 
 
+def world_frame_points(robot_pose: np.ndarray, points_robot: np.ndarray) -> np.ndarray:
+    pose = np.asarray(robot_pose, dtype=float)
+    points = np.asarray(points_robot, dtype=float)
+    cos_theta = float(np.cos(pose[2]))
+    sin_theta = float(np.sin(pose[2]))
+    rotation = np.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=float)
+    return points @ rotation.T + pose[:2][None, :]
+
+
 class LearnedStructuredController:
     """Roll out the structured dynamics model for dynamic scoring."""
 
@@ -390,6 +399,7 @@ class LearnedStructuredController:
         dynamic_collisions: list[bool] = []
         planning_collisions: list[bool] = []
         combined_clearances: list[float] = []
+        predicted_positions_world: list[list[list[float]]] = []
         predicted_positions_robot: list[list[list[float]]] = []
         predicted_velocities_robot: list[list[list[float]]] = []
         true_positions_robot: list[list[list[float]]] = []
@@ -461,12 +471,18 @@ class LearnedStructuredController:
                     vel_rel_next = outputs["pred_next_rel_vel"][0].detach().cpu().numpy().astype(np.float32)
                 else:
                     vel_rel_next = vel_state_next
+            pos_world_next = (
+                pos_state_next.astype(float)
+                if use_world_state
+                else world_frame_points(pose, pos_rel_next.astype(float))
+            )
 
             predicted_clearances = dynamic_clearances_from_positions(
                 pos_rel_next.astype(float),
                 radii.astype(float),
                 self.config.robot_config.radius,
             )
+            predicted_positions_world.append(pos_world_next.astype(float).tolist())
             predicted_positions_robot.append(pos_rel_next.astype(float).tolist())
             predicted_velocities_robot.append(vel_rel_next.astype(float).tolist())
             dynamic_clearances.append(float(np.min(predicted_clearances)) if predicted_clearances.size else float("inf"))
@@ -563,6 +579,7 @@ class LearnedStructuredController:
             "dynamic_clearances": dynamic_clearances,
             "dynamic_collisions": dynamic_collisions,
             "combined_clearances": combined_clearances,
+            "predicted_positions_world": predicted_positions_world,
             "predicted_positions_robot": predicted_positions_robot,
             "predicted_relative_velocities": predicted_velocities_robot,
             "true_positions_robot": true_positions_robot,
@@ -651,6 +668,8 @@ class LearnedStructuredController:
             "omega": float(first_sample["omega"]),
             "wz": float(first_sample["wz"]),
             "action_cont": list(first_sample["action_cont"]),
+            "robot_rollout_world": list(first_sample.get("robot_rollout_world", [])),
+            "predicted_positions_world": list(first_sample.get("predicted_positions_world", [])),
             "total_cost_before_backward_penalty": float(stochastic_score),
             "total_cost_after_backward_penalty": float(stochastic_score),
             "total_cost": float(stochastic_score),

@@ -13,6 +13,8 @@
     tracked_waypoint_topic: /world_model_nav/tracked_waypoint
     robot_marker_topic: /world_model_nav/robot_footprint
     policy_debug_topic: /world_model_nav/policy_debug
+    rollout_markers_topic: /world_model_nav/trajectory_rollouts
+    predicted_dynamic_obstacles_topic: /world_model_nav/predicted_dynamic_obstacles
     map_image_topic: /map_image
 
     control_frequency: 10.0

@@ -543,6 +543,7 @@ class BaselineStructuredController:
         dynamic_collisions: list[bool] = []
         planning_collisions: list[bool] = []
         combined_clearances: list[float] = []
+        dynamic_positions_world: list[list[list[float]]] = []
         dynamic_positions_robot: list[list[list[float]]] = []
         infeasible_reasons: list[str] = []
 
@@ -589,6 +590,7 @@ class BaselineStructuredController:
             static_clearances.append(static_clearance)
             static_collisions.append(static_collision)
             planning_collisions.append(planning_collision)
+            dynamic_positions_world.append(positions_world.astype(float).tolist())
             dynamic_positions_robot.append(positions_robot.astype(float).tolist())
             dynamic_clearance = float(np.min(dyn_clearances)) if dyn_clearances.size else float("inf")
             dynamic_clearances.append(dynamic_clearance)
@@ -639,6 +641,7 @@ class BaselineStructuredController:
             "dynamic_clearances": dynamic_clearances,
             "dynamic_collisions": dynamic_collisions,
             "combined_clearances": combined_clearances,
+            "dynamic_positions_world": dynamic_positions_world,
             "dynamic_positions_robot": dynamic_positions_robot,
             "feasible": bool(feasible),
             "infeasible_reasons": infeasible_reasons,
@@ -717,6 +720,8 @@ class BaselineStructuredController:
             "omega": float(first_sample["omega"]),
             "wz": float(first_sample["wz"]),
             "action_cont": list(first_sample["action_cont"]),
+            "robot_rollout_world": list(first_sample.get("robot_rollout_world", [])),
+            "dynamic_positions_world": list(first_sample.get("dynamic_positions_world", [])),
             "total_cost_before_backward_penalty": float(stochastic_score),
             "total_cost_after_backward_penalty": float(stochastic_score),
             "total_cost": float(stochastic_score),

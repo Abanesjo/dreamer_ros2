@@ -44,10 +44,17 @@ class PolicyControllerNode(Node):
         self.cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self.robot_marker_topic = str(self.get_parameter("robot_marker_topic").value)
         self.policy_debug_topic = str(self.get_parameter("policy_debug_topic").value)
+        self.rollout_markers_topic = str(self.get_parameter("rollout_markers_topic").value)
+        self.predicted_dynamic_obstacles_topic = str(
+            self.get_parameter("predicted_dynamic_obstacles_topic").value
+        )
         self.control_frequency = float(self.get_parameter("control_frequency").value)
         configured_policy_path = str(self.get_parameter("policy_path").value)
         self.policy_mode = str(self.get_parameter("policy_mode").value)
         self.robot_radius = float(self.get_parameter("robot_radius").value)
+        self.visual_dynamic_obstacle_radius = float(
+            self.get_parameter("visual_dynamic_obstacle_radius").value
+        )
         self.robot_marker_segments = max(8, int(self.get_parameter("robot_marker_segments").value))
         self.robot_marker_line_width = float(self.get_parameter("robot_marker_line_width").value)
 
@@ -63,6 +70,7 @@ class PolicyControllerNode(Node):
             map_occupied_threshold=int(self.get_parameter("map_occupied_threshold").value),
             treat_unknown_as_occupied=bool(self.get_parameter("treat_unknown_as_occupied").value),
             dynamic_obstacle_radius=float(self.get_parameter("dynamic_obstacle_radius").value),
+            visual_dynamic_obstacle_radius=self.visual_dynamic_obstacle_radius,
             expected_dynamic_obstacles=int(self.get_parameter("expected_dynamic_obstacles").value),
             min_obstacle_dt=float(self.get_parameter("min_obstacle_dt").value),
             dynamic_obstacle_stale_timeout=float(
@@ -133,13 +141,24 @@ class PolicyControllerNode(Node):
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, default_qos())
         self.robot_marker_pub = self.create_publisher(Marker, self.robot_marker_topic, default_qos())
         self.policy_debug_pub = self.create_publisher(String, self.policy_debug_topic, default_qos())
+        self.rollout_marker_pub = self.create_publisher(
+            MarkerArray,
+            self.rollout_markers_topic,
+            default_qos(),
+        )
+        self.predicted_obstacle_marker_pub = self.create_publisher(
+            MarkerArray,
+            self.predicted_dynamic_obstacles_topic,
+            default_qos(),
+        )
 
         self.timer = self.create_timer(1.0 / max(self.control_frequency, 1e-6), self._on_timer)
         self.get_logger().info(
             "Policy controller ready: "
             f"mode={self.policy_mode}, policy={nav_config.policy_path}, path={self.path_topic}, "
             f"tracked={self.tracked_waypoint_topic}, cmd={self.cmd_vel_topic}, "
-            f"debug={self.policy_debug_topic}"
+            f"debug={self.policy_debug_topic}, rollouts={self.rollout_markers_topic}, "
+            f"predicted_obstacles={self.predicted_dynamic_obstacles_topic}"
         )
 
     def _declare_parameters(self) -> None:
@@ -152,6 +171,11 @@ class PolicyControllerNode(Node):
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("robot_marker_topic", "/world_model_nav/robot_footprint")
         self.declare_parameter("policy_debug_topic", "/world_model_nav/policy_debug")
+        self.declare_parameter("rollout_markers_topic", "/world_model_nav/trajectory_rollouts")
+        self.declare_parameter(
+            "predicted_dynamic_obstacles_topic",
+            "/world_model_nav/predicted_dynamic_obstacles",
+        )
         self.declare_parameter("control_frequency", 10.0)
         self.declare_parameter("policy_path", default_policy_path())
         self.declare_parameter("policy_mode", "quadruped")
@@ -167,6 +191,7 @@ class PolicyControllerNode(Node):
         self.declare_parameter("map_occupied_threshold", 50)
         self.declare_parameter("treat_unknown_as_occupied", True)
         self.declare_parameter("dynamic_obstacle_radius", 1.0)
+        self.declare_parameter("visual_dynamic_obstacle_radius", 0.5)
         self.declare_parameter("expected_dynamic_obstacles", 4)
         self.declare_parameter("min_obstacle_dt", 1e-3)
         self.declare_parameter("dynamic_obstacle_stale_timeout", 1.0)
@@ -271,6 +296,7 @@ class PolicyControllerNode(Node):
         self._publish_cmd(result.command)
         self._log_step_message(result)
         self._publish_policy_debug(result)
+        self._publish_visualization_markers(result)
 
     def _publish_cmd(self, command: np.ndarray) -> None:
         msg = Twist()
@@ -343,10 +369,173 @@ class PolicyControllerNode(Node):
                 "num_feasible_all": result.num_feasible_all,
                 "obstacle_count": result.obstacle_count,
                 "reasons": list(result.chosen_infeasible_reasons),
+                "visualization": result.visualization or {},
             },
             sort_keys=True,
         )
         self.policy_debug_pub.publish(msg)
+
+    def _publish_visualization_markers(self, result: StepResult) -> None:
+        visualization = result.visualization if isinstance(result.visualization, dict) else {}
+        self.rollout_marker_pub.publish(self._rollout_marker_array(visualization))
+        self.predicted_obstacle_marker_pub.publish(self._predicted_obstacle_marker_array(visualization))
+
+    def _rollout_marker_array(self, visualization: dict[str, object]) -> MarkerArray:
+        markers = MarkerArray()
+        markers.markers.append(self._delete_all_marker("world_model_nav_rollouts"))
+        rollouts = visualization.get("rollouts", [])
+        if not isinstance(rollouts, list):
+            return markers
+        score_range = self._score_range(rollouts)
+        marker_id = 1
+        for rollout in rollouts:
+            if not isinstance(rollout, dict):
+                continue
+            points = self._points_from_pose_list(rollout.get("points", []), z=0.07)
+            if len(points) < 2:
+                continue
+            color = self._score_color(rollout.get("score"), score_range)
+            marker = Marker()
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.header.frame_id = self.frame_id
+            marker.ns = "world_model_nav_rollouts"
+            marker.id = marker_id
+            marker_id += 1
+            marker.type = Marker.LINE_STRIP
+            marker.action = Marker.ADD
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = 0.06 if bool(rollout.get("selected", False)) else 0.025
+            marker.color.r = color[0]
+            marker.color.g = color[1]
+            marker.color.b = color[2]
+            marker.color.a = 0.95 if bool(rollout.get("selected", False)) else 0.65
+            marker.points.extend(points)
+            markers.markers.append(marker)
+        return markers
+
+    def _predicted_obstacle_marker_array(self, visualization: dict[str, object]) -> MarkerArray:
+        markers = MarkerArray()
+        markers.markers.append(self._delete_all_marker("world_model_nav_predicted_obstacles"))
+        predictions = visualization.get("selected_dynamic_obstacle_predictions", {})
+        if not isinstance(predictions, dict):
+            return markers
+        raw_positions = predictions.get("positions", [])
+        if not isinstance(raw_positions, list):
+            return markers
+        radius = self._positive_float(
+            predictions.get("radius"),
+            default=self.visual_dynamic_obstacle_radius,
+        )
+        horizon = max(1, len(raw_positions))
+        marker_id = 1
+        for step_index, step_positions in enumerate(raw_positions):
+            if not isinstance(step_positions, list):
+                continue
+            alpha = max(0.25, 0.8 - 0.45 * (float(step_index) / float(horizon)))
+            for position in step_positions:
+                center = self._xy_from_value(position)
+                if center is None:
+                    continue
+                marker = Marker()
+                marker.header.stamp = self.get_clock().now().to_msg()
+                marker.header.frame_id = self.frame_id
+                marker.ns = "world_model_nav_predicted_obstacles"
+                marker.id = marker_id
+                marker_id += 1
+                marker.type = Marker.LINE_STRIP
+                marker.action = Marker.ADD
+                marker.pose.orientation.w = 1.0
+                marker.scale.x = 0.025
+                marker.color.r = 0.55
+                marker.color.g = 0.15
+                marker.color.b = 0.95
+                marker.color.a = alpha
+                marker.points.extend(self._circle_points(center, radius=radius, z=0.05))
+                markers.markers.append(marker)
+        return markers
+
+    def _delete_all_marker(self, namespace: str) -> Marker:
+        marker = Marker()
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.header.frame_id = self.frame_id
+        marker.ns = namespace
+        marker.id = 0
+        marker.action = Marker.DELETEALL
+        return marker
+
+    def _points_from_pose_list(self, values: object, *, z: float) -> list[Point]:
+        if not isinstance(values, list):
+            return []
+        points: list[Point] = []
+        for value in values:
+            xy = self._xy_from_value(value)
+            if xy is None:
+                continue
+            point = Point()
+            point.x = float(xy[0])
+            point.y = float(xy[1])
+            point.z = float(z)
+            points.append(point)
+        return points
+
+    def _circle_points(self, center: tuple[float, float], *, radius: float, z: float) -> list[Point]:
+        points: list[Point] = []
+        for index in range(self.robot_marker_segments + 1):
+            angle = (2.0 * math.pi * index) / float(self.robot_marker_segments)
+            point = Point()
+            point.x = float(center[0] + radius * math.cos(angle))
+            point.y = float(center[1] + radius * math.sin(angle))
+            point.z = float(z)
+            points.append(point)
+        return points
+
+    def _xy_from_value(self, value: object) -> tuple[float, float] | None:
+        try:
+            xy = np.asarray(value, dtype=float).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        if xy.size < 2 or not np.all(np.isfinite(xy[:2])):
+            return None
+        return (float(xy[0]), float(xy[1]))
+
+    def _score_range(self, rollouts: list[object]) -> tuple[float, float] | None:
+        scores: list[float] = []
+        for rollout in rollouts:
+            if not isinstance(rollout, dict):
+                continue
+            try:
+                score = float(rollout.get("score"))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(score):
+                scores.append(score)
+        if not scores:
+            return None
+        return (min(scores), max(scores))
+
+    def _score_color(
+        self,
+        raw_score: object,
+        score_range: tuple[float, float] | None,
+    ) -> tuple[float, float, float]:
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            return (1.0, 0.0, 0.0)
+        if score_range is None or not np.isfinite(score):
+            return (1.0, 0.0, 0.0)
+        min_score, max_score = score_range
+        if max_score <= min_score:
+            return (0.0, 1.0, 0.0)
+        ratio = min(1.0, max(0.0, (score - min_score) / (max_score - min_score)))
+        return (ratio, 1.0 - ratio, 0.0)
+
+    def _positive_float(self, value: object, *, default: float) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        return number if number > 0.0 and np.isfinite(number) else float(default)
 
     def _warn_throttled(self, message: str, period: float = 2.0) -> None:
         now = self.get_clock().now().nanoseconds * 1e-9
