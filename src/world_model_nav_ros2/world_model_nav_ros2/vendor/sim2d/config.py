@@ -8,15 +8,74 @@ from typing import Dict, List
 import numpy as np
 
 
-ACTIONS: Dict[int, Dict[str, float | str]] = {
-    0: {"name": "stop", "v": 0.0, "omega": 0.0},
-    1: {"name": "forward", "v": 0.8, "omega": 0.0},
-    2: {"name": "forward_left", "v": 0.8, "omega": 1.0},
-    3: {"name": "forward_right", "v": 0.8, "omega": -1.0},
-    4: {"name": "slow_left", "v": 0.5, "omega": 1.0},
-    5: {"name": "slow_right", "v": 0.5, "omega": -1.0},
-    6: {"name": "backward", "v": -0.5, "omega": 0.0},
+QUADRUPED_POLICY_MODE = "quadruped"
+UNICYCLE_POLICY_MODE = "unicycle"
+
+
+QUADRUPED_ACTIONS: Dict[int, Dict[str, float | str]] = {
+    0: {"name": "stop", "vx": 0.0, "vy": 0.0, "omega": 0.0},
+    1: {"name": "forward", "vx": 0.8, "vy": 0.0, "omega": 0.0},
+    2: {"name": "backward", "vx": -0.4, "vy": 0.0, "omega": 0.0},
+    3: {"name": "strafe_left", "vx": 0.0, "vy": 0.4, "omega": 0.0},
+    4: {"name": "strafe_right", "vx": 0.0, "vy": -0.4, "omega": 0.0},
+    5: {"name": "forward_left", "vx": 0.6, "vy": 0.4, "omega": 0.0},
+    6: {"name": "forward_right", "vx": 0.6, "vy": -0.4, "omega": 0.0},
+    7: {"name": "backward_left", "vx": -0.4, "vy": 0.4, "omega": 0.0},
+    8: {"name": "backward_right", "vx": -0.4, "vy": -0.4, "omega": 0.0},
+    9: {"name": "rotate_left", "vx": 0.0, "vy": 0.0, "omega": 0.6},
+    10: {"name": "rotate_right", "vx": 0.0, "vy": 0.0, "omega": -0.6},
+    11: {"name": "forward_arc_left", "vx": 0.6, "vy": 0.0, "omega": 0.6},
+    12: {"name": "forward_arc_right", "vx": 0.6, "vy": 0.0, "omega": -0.6},
 }
+
+UNICYCLE_ACTIONS: Dict[int, Dict[str, float | str]] = {
+    0: {"name": "stop", "vx": 0.0, "vy": 0.0, "v": 0.0, "omega": 0.0},
+    1: {"name": "forward", "vx": 0.8, "vy": 0.0, "v": 0.8, "omega": 0.0},
+    2: {"name": "forward_left", "vx": 0.8, "vy": 0.0, "v": 0.8, "omega": 1.0},
+    3: {"name": "forward_right", "vx": 0.8, "vy": 0.0, "v": 0.8, "omega": -1.0},
+    4: {"name": "slow_left", "vx": 0.5, "vy": 0.0, "v": 0.5, "omega": 1.0},
+    5: {"name": "slow_right", "vx": 0.5, "vy": 0.0, "v": 0.5, "omega": -1.0},
+    6: {"name": "backward", "vx": -0.5, "vy": 0.0, "v": -0.5, "omega": 0.0},
+}
+
+ACTION_SETS: Dict[str, Dict[int, Dict[str, float | str]]] = {
+    QUADRUPED_POLICY_MODE: QUADRUPED_ACTIONS,
+    UNICYCLE_POLICY_MODE: UNICYCLE_ACTIONS,
+}
+
+# Keep the historical import name as the quadruped default for callers that do not
+# opt into a mode-specific action set.
+ACTIONS = QUADRUPED_ACTIONS
+
+
+def normalize_policy_mode(policy_mode: str) -> str:
+    mode = str(policy_mode).strip().lower()
+    if mode not in ACTION_SETS:
+        raise ValueError(f"Unsupported policy_mode={policy_mode!r}; expected one of {sorted(ACTION_SETS)}")
+    return mode
+
+
+def actions_for_mode(policy_mode: str) -> Dict[int, Dict[str, float | str]]:
+    return ACTION_SETS[normalize_policy_mode(policy_mode)]
+
+
+def default_action_indices_for_mode(policy_mode: str) -> tuple[int, ...]:
+    return tuple(actions_for_mode(policy_mode).keys())
+
+
+def action_cont_dim_for_mode(policy_mode: str) -> int:
+    return 2 if normalize_policy_mode(policy_mode) == UNICYCLE_POLICY_MODE else 3
+
+
+def action_cont_for_mode(action: Dict[str, float | str], policy_mode: str) -> list[float]:
+    if normalize_policy_mode(policy_mode) == UNICYCLE_POLICY_MODE:
+        return [float(action["vx"]), float(action["omega"])]
+    return [float(action["vx"]), float(action["vy"]), float(action["omega"])]
+
+
+def expected_checkpoint_dims_for_mode(policy_mode: str) -> tuple[int, int]:
+    mode = normalize_policy_mode(policy_mode)
+    return len(actions_for_mode(mode)), action_cont_dim_for_mode(mode)
 
 
 @dataclass
@@ -117,14 +176,17 @@ class DatasetConfig:
         return data
 
 
-def action_space_to_list() -> List[Dict[str, object]]:
+def action_space_to_list(policy_mode: str = QUADRUPED_POLICY_MODE) -> List[Dict[str, object]]:
     """Return the fixed action space in a JSON-friendly order."""
     return [
         {
             "index": action_index,
             "name": action["name"],
-            "v": float(action["v"]),
+            "vx": float(action["vx"]),
+            "vy": float(action["vy"]),
+            "v": float(action["vx"]),
             "omega": float(action["omega"]),
+            "wz": float(action["omega"]),
         }
-        for action_index, action in ACTIONS.items()
+        for action_index, action in actions_for_mode(policy_mode).items()
     ]

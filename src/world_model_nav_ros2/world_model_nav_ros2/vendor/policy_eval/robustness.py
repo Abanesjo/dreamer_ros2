@@ -7,7 +7,7 @@ from typing import Sequence
 
 import numpy as np
 
-from world_model_nav_ros2.vendor.sim2d.dynamics import unicycle_step
+from world_model_nav_ros2.vendor.sim2d.dynamics import holonomic_step
 from world_model_nav_ros2.vendor.sim2d.utils import wrap_angle
 
 
@@ -26,6 +26,15 @@ def covariance_summary(covariance: np.ndarray) -> dict[str, object]:
     }
 
 
+def _control_xyz(commanded_control: Sequence[float]) -> np.ndarray:
+    control = np.asarray(commanded_control, dtype=float).reshape(-1)
+    if control.size == 2:
+        return np.array([float(control[0]), 0.0, float(control[1])], dtype=float)
+    if control.size < 3:
+        raise ValueError(f"Expected 3D holonomic control, got shape {control.shape}")
+    return control[:3].astype(float)
+
+
 def sample_executed_control(
     rng: np.random.Generator,
     commanded_control: Sequence[float],
@@ -34,11 +43,12 @@ def sample_executed_control(
     sigma_v: float,
     sigma_omega: float,
 ) -> np.ndarray:
-    control = np.asarray(commanded_control, dtype=float)
+    control = _control_xyz(commanded_control)
     if not execution_noise_enabled:
         return control.copy()
     noise = np.array(
         [
+            float(rng.normal(0.0, float(sigma_v))),
             float(rng.normal(0.0, float(sigma_v))),
             float(rng.normal(0.0, float(sigma_omega))),
         ],
@@ -72,14 +82,22 @@ def generate_rollout_noise_sequences(
     execution_noise_enabled: bool,
     sigma_v: float,
     sigma_omega: float,
+    control_dim: int = 3,
 ) -> np.ndarray:
     num_rollouts = max(1, int(num_stochastic_rollouts))
     horizon_steps = max(1, int(horizon))
+    dim = int(control_dim)
+    if dim not in (2, 3):
+        raise ValueError(f"control_dim must be 2 or 3, got {control_dim!r}")
     if not execution_noise_enabled:
-        return np.zeros((num_rollouts, horizon_steps, 2), dtype=float)
-    noise = np.zeros((num_rollouts, horizon_steps, 2), dtype=float)
+        return np.zeros((num_rollouts, horizon_steps, dim), dtype=float)
+    noise = np.zeros((num_rollouts, horizon_steps, dim), dtype=float)
     noise[:, :, 0] = rng.normal(0.0, float(sigma_v), size=(num_rollouts, horizon_steps))
-    noise[:, :, 1] = rng.normal(0.0, float(sigma_omega), size=(num_rollouts, horizon_steps))
+    if dim == 2:
+        noise[:, :, 1] = rng.normal(0.0, float(sigma_omega), size=(num_rollouts, horizon_steps))
+    else:
+        noise[:, :, 1] = rng.normal(0.0, float(sigma_v), size=(num_rollouts, horizon_steps))
+        noise[:, :, 2] = rng.normal(0.0, float(sigma_omega), size=(num_rollouts, horizon_steps))
     return noise
 
 
@@ -101,32 +119,39 @@ class RobotPoseEKF:
         sigma_v: float,
         sigma_omega: float,
     ) -> dict[str, object]:
-        control = np.asarray(commanded_control, dtype=float)
+        control = _control_xyz(commanded_control)
         theta = float(self.mean[2])
-        v_cmd = float(control[0])
+        vx_cmd = float(control[0])
+        vy_cmd = float(control[1])
         dt_value = float(dt)
         state_jacobian = np.array(
             [
-                [1.0, 0.0, -v_cmd * np.sin(theta) * dt_value],
-                [0.0, 1.0, v_cmd * np.cos(theta) * dt_value],
+                [1.0, 0.0, (-vx_cmd * np.sin(theta) - vy_cmd * np.cos(theta)) * dt_value],
+                [0.0, 1.0, (vx_cmd * np.cos(theta) - vy_cmd * np.sin(theta)) * dt_value],
                 [0.0, 0.0, 1.0],
             ],
             dtype=float,
         )
         control_jacobian = np.array(
             [
-                [np.cos(theta) * dt_value, 0.0],
-                [np.sin(theta) * dt_value, 0.0],
-                [0.0, dt_value],
+                [np.cos(theta) * dt_value, -np.sin(theta) * dt_value, 0.0],
+                [np.sin(theta) * dt_value, np.cos(theta) * dt_value, 0.0],
+                [0.0, 0.0, dt_value],
             ],
             dtype=float,
         )
         if execution_noise_enabled:
-            control_cov = np.diag([float(sigma_v) ** 2, float(sigma_omega) ** 2])
+            control_cov = np.diag([float(sigma_v) ** 2, float(sigma_v) ** 2, float(sigma_omega) ** 2])
         else:
-            control_cov = np.zeros((2, 2), dtype=float)
+            control_cov = np.zeros((3, 3), dtype=float)
         process_cov = control_jacobian @ control_cov @ control_jacobian.T
-        predicted_mean = unicycle_step(self.mean, float(control[0]), float(control[1]), dt_value)
+        predicted_mean = holonomic_step(
+            self.mean,
+            float(control[0]),
+            float(control[1]),
+            float(control[2]),
+            dt_value,
+        )
         predicted_cov = state_jacobian @ self.covariance @ state_jacobian.T + process_cov
         self.mean = _wrap_pose_theta(predicted_mean)
         self.covariance = predicted_cov

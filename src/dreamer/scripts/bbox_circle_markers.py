@@ -18,7 +18,7 @@ class BboxCircleMarkers(Node):
         self.declare_parameter("input_topic", "/bbox_3d")
         self.declare_parameter("marker_topic", "/dynamic_obstacles")
         self.declare_parameter("frame_id", "world")
-        self.declare_parameter("radius", 1.0)
+        self.declare_parameter("radius", 0.5)
         self.declare_parameter("segments", 64)
         self.declare_parameter("line_width", 0.04)
 

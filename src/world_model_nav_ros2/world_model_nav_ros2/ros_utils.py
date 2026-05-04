@@ -17,9 +17,9 @@ PACKAGE_NAME = "world_model_nav_ros2"
 
 def default_policy_path() -> str:
     try:
-        return str(Path(get_package_share_directory(PACKAGE_NAME)) / "model" / "best.pt")
+        return str(Path(get_package_share_directory(PACKAGE_NAME)) / "model" / "quadruped.pt")
     except PackageNotFoundError:
-        return str(Path(__file__).resolve().parents[1] / "model" / "best.pt")
+        return str(Path(__file__).resolve().parents[1] / "model" / "quadruped.pt")
 
 
 def default_qos(depth: int = 10) -> QoSProfile:

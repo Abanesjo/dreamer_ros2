@@ -60,7 +60,7 @@ class MapImagePublisherNode(Node):
         self.figure_size = self._figure_size_parameter("map_image_figure_size")
         self.dpi = int(self.get_parameter("map_image_dpi").value)
         self.robot_radius = float(self.get_parameter("robot_radius").value)
-        self.dynamic_obstacle_radius = float(self.get_parameter("dynamic_obstacle_radius").value)
+        self.dynamic_obstacle_radius = float(self.get_parameter("visual_dynamic_obstacle_radius").value)
         self.map_occupied_threshold = int(self.get_parameter("map_occupied_threshold").value)
         self.treat_unknown_as_occupied = bool(self.get_parameter("treat_unknown_as_occupied").value)
 
@@ -127,7 +127,8 @@ class MapImagePublisherNode(Node):
         self.declare_parameter("map_image_figure_size", [8.0, 8.0])
         self.declare_parameter("map_image_dpi", 120)
         self.declare_parameter("robot_radius", 0.4)
-        self.declare_parameter("dynamic_obstacle_radius", 0.5)
+        self.declare_parameter("dynamic_obstacle_radius", 1.0)
+        self.declare_parameter("visual_dynamic_obstacle_radius", 0.5)
         self.declare_parameter("map_occupied_threshold", 50)
         self.declare_parameter("treat_unknown_as_occupied", True)
 
@@ -303,6 +304,9 @@ class MapImagePublisherNode(Node):
     def _format_policy_title(self, payload: dict[str, object]) -> str:
         action = str(payload.get("action", "unknown"))
         selection = str(payload.get("selection_mode", ""))
+        vx = self._format_optional_float(payload.get("vx", payload.get("v")), precision=2)
+        vy = self._format_optional_float(payload.get("vy"), precision=2)
+        omega = self._format_optional_float(payload.get("omega", payload.get("wz")), precision=2)
         clearance = self._format_optional_float(payload.get("min_clearance"), precision=3)
         pose_error = self._format_optional_float(payload.get("pose_estimate_error"), precision=3)
         feasible_non_stop = payload.get("num_feasible_non_stop", "?")
@@ -312,6 +316,7 @@ class MapImagePublisherNode(Node):
         reason_text = ",".join(str(reason) for reason in reasons) if reasons else "none"
         return (
             f"World-Model-Nav | action={action} | {selection} | "
+            f"cmd=({vx},{vy},{omega}) | "
             f"clearance={clearance}m | pose_err={pose_error}m | "
             f"feasible={feasible_non_stop}/{feasible_all} | obstacles={obstacles} | reasons={reason_text}"
         )
@@ -325,16 +330,7 @@ class MapImagePublisherNode(Node):
             return "nan"
 
     def _marker_radius(self, marker: Marker, center: np.ndarray) -> float:
-        if marker.points:
-            points = marker.points[:-1] if len(marker.points) > 1 else marker.points
-            coords = np.asarray([[float(point.x), float(point.y)] for point in points], dtype=float)
-            if coords.size:
-                distances = np.linalg.norm(coords - np.asarray(center, dtype=float).reshape(1, 2), axis=1)
-                radius = float(np.mean(distances))
-                if radius > 0.0:
-                    return radius
-        if marker.scale.x > 0.0:
-            return float(marker.scale.x)
+        del marker, center
         return self.dynamic_obstacle_radius
 
     def _image_msg(self, rgb: np.ndarray, *, frame_id: str) -> Image:

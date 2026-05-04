@@ -13,11 +13,18 @@ from world_model_nav_ros2.vendor.policy_eval.robustness import (
     covariance_summary,
     generate_rollout_noise_sequences,
 )
-from world_model_nav_ros2.vendor.sim2d.config import ACTIONS, DatasetConfig
+from world_model_nav_ros2.vendor.sim2d.config import (
+    QUADRUPED_POLICY_MODE,
+    DatasetConfig,
+    action_cont_dim_for_mode,
+    action_cont_for_mode,
+    actions_for_mode,
+    default_action_indices_for_mode,
+)
 from world_model_nav_ros2.vendor.sim2d.dynamics import (
     disk_collides_with_occupancy,
+    holonomic_step,
     minimum_static_clearance,
-    unicycle_step,
 )
 from world_model_nav_ros2.vendor.sim2d.obstacles import DynamicObstacle
 from world_model_nav_ros2.vendor.sim2d.utils import (
@@ -47,7 +54,8 @@ class StructuredControllerConfig:
     backward_gate_enabled: bool = True
     dynamic_stop_clearance_threshold: float = 0.20
     backward_dynamic_margin: float = 0.10
-    action_indices: tuple[int, ...] = tuple(ACTIONS.keys())
+    policy_mode: str = QUADRUPED_POLICY_MODE
+    action_indices: tuple[int, ...] = default_action_indices_for_mode(QUADRUPED_POLICY_MODE)
     execution_noise_enabled: bool = False
     sigma_v: float = 0.05
     sigma_omega: float = 0.1
@@ -96,12 +104,28 @@ def dynamic_clearances_from_positions(
     return distances - float(robot_radius) - obstacle_radii
 
 
-def velocity_penalty_from_action(v: float) -> float:
-    return max(0.0, 0.4 - float(v))
+def velocity_penalty_from_action(vx: float, vy: float) -> float:
+    translation_speed = float(np.hypot(float(vx), float(vy)))
+    reverse_cost = max(0.0, -float(vx))
+    return max(0.0, 0.4 - translation_speed) + reverse_cost
 
 
 def effective_runtime_actions(controller_cfg: StructuredControllerConfig) -> dict[int, dict[str, float | str]]:
-    return {int(action_index): ACTIONS[int(action_index)] for action_index in controller_cfg.action_indices}
+    actions = actions_for_mode(controller_cfg.policy_mode)
+    return {int(action_index): actions[int(action_index)] for action_index in controller_cfg.action_indices}
+
+
+def control_noise_xyz_for_mode(control_noise: np.ndarray | None, policy_mode: str) -> np.ndarray:
+    if control_noise is None:
+        return np.zeros((3,), dtype=float)
+    noise = np.asarray(control_noise, dtype=float).reshape(-1)
+    if action_cont_dim_for_mode(policy_mode) == 2:
+        vx_noise = float(noise[0]) if noise.size > 0 else 0.0
+        omega_noise = float(noise[1]) if noise.size > 1 else 0.0
+        return np.array([vx_noise, 0.0, omega_noise], dtype=float)
+    padded = np.zeros((3,), dtype=float)
+    padded[: min(3, noise.size)] = noise[:3]
+    return padded
 
 
 def _matches_action_name(candidate: dict[str, Any], expected_name: str) -> bool:
@@ -113,16 +137,23 @@ def _is_stop_candidate(candidate: dict[str, Any]) -> bool:
 
 
 def _is_backward_candidate(candidate: dict[str, Any], controller_cfg: StructuredControllerConfig) -> bool:
-    return _matches_action_name(candidate, controller_cfg.backward_action_name)
+    if _matches_action_name(candidate, controller_cfg.backward_action_name):
+        return True
+    try:
+        return float(candidate.get("vx", candidate.get("v", 0.0))) < 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 def apply_backward_policy(
     candidates: list[dict[str, Any]],
     controller_cfg: StructuredControllerConfig,
 ) -> dict[str, object]:
-    backward_candidate = next(
-        (candidate for candidate in candidates if _is_backward_candidate(candidate, controller_cfg)),
-        None,
+    backward_candidates = [candidate for candidate in candidates if _is_backward_candidate(candidate, controller_cfg)]
+    backward_candidate = min(
+        backward_candidates,
+        key=lambda candidate: float(candidate.get("total_cost", float("inf"))),
+        default=None,
     )
     stop_candidate = next((candidate for candidate in candidates if _is_stop_candidate(candidate)), None)
     normal_non_stop_candidates = [
@@ -150,49 +181,59 @@ def apply_backward_policy(
     backward_candidate_cost_after_penalty = float("nan")
 
     if backward_candidate is not None:
-        backward_candidate_cost_before_penalty = float(backward_candidate.get("total_cost_before_backward_penalty", backward_candidate.get("total_cost", float("nan"))))
-        backward_allowed = True
-        backward_gate_reason = "gate_disabled"
-        if controller_cfg.backward_gate_enabled:
-            static_escape_allowed = normal_non_stop_static_or_planning_feasible_count == 0
-            stop_is_dynamically_unsafe = bool(
-                stop_dynamic_collision
-                or stop_min_dynamic_clearance < float(controller_cfg.dynamic_stop_clearance_threshold)
+        for reverse_candidate in backward_candidates:
+            reverse_cost_before_penalty = float(
+                reverse_candidate.get(
+                    "total_cost_before_backward_penalty",
+                    reverse_candidate.get("total_cost", float("nan")),
+                )
             )
-            backward_min_dynamic_clearance = float(backward_candidate.get("min_dynamic_clearance", float("-inf")))
-            dynamic_escape_allowed = bool(
-                stop_is_dynamically_unsafe
-                and backward_min_dynamic_clearance
-                > stop_min_dynamic_clearance + float(controller_cfg.backward_dynamic_margin)
-            )
-            if static_escape_allowed:
-                backward_allowed = True
-                backward_gate_reason = "static_escape"
-            elif dynamic_escape_allowed:
-                backward_allowed = True
-                backward_gate_reason = "dynamic_escape"
-            elif stop_is_dynamically_unsafe:
-                backward_allowed = False
-                backward_gate_reason = "dynamic_gate_failed"
-            else:
-                backward_allowed = False
-                backward_gate_reason = "not_escape_condition"
-        backward_candidate["backward_allowed"] = bool(backward_allowed)
-        backward_candidate["backward_gated"] = bool(not backward_allowed)
-        backward_candidate["backward_gate_reason"] = str(backward_gate_reason)
-        if not backward_allowed:
-            infeasible_reasons = list(backward_candidate.get("infeasible_reasons", []))
-            if "backward_gated" not in infeasible_reasons:
-                infeasible_reasons.append("backward_gated")
-            backward_candidate["infeasible_reasons"] = infeasible_reasons
-            backward_candidate["feasible"] = False
-        penalty_value = float(controller_cfg.backward_penalty) if controller_cfg.backward_penalty_enabled else 0.0
-        penalty_applied = bool(controller_cfg.backward_penalty_enabled)
-        backward_candidate["backward_penalty_applied"] = penalty_applied
-        backward_candidate["backward_penalty_value"] = penalty_value
-        backward_candidate["total_cost_after_backward_penalty"] = float(backward_candidate_cost_before_penalty + penalty_value)
-        backward_candidate["total_cost"] = float(backward_candidate["total_cost_after_backward_penalty"])
-        backward_candidate_cost_after_penalty = float(backward_candidate["total_cost_after_backward_penalty"])
+            reverse_allowed = True
+            reverse_gate_reason = "gate_disabled"
+            if controller_cfg.backward_gate_enabled:
+                static_escape_allowed = normal_non_stop_static_or_planning_feasible_count == 0
+                stop_is_dynamically_unsafe = bool(
+                    stop_dynamic_collision
+                    or stop_min_dynamic_clearance < float(controller_cfg.dynamic_stop_clearance_threshold)
+                )
+                reverse_min_dynamic_clearance = float(reverse_candidate.get("min_dynamic_clearance", float("-inf")))
+                dynamic_escape_allowed = bool(
+                    stop_is_dynamically_unsafe
+                    and reverse_min_dynamic_clearance
+                    > stop_min_dynamic_clearance + float(controller_cfg.backward_dynamic_margin)
+                )
+                if static_escape_allowed:
+                    reverse_allowed = True
+                    reverse_gate_reason = "static_escape"
+                elif dynamic_escape_allowed:
+                    reverse_allowed = True
+                    reverse_gate_reason = "dynamic_escape"
+                elif stop_is_dynamically_unsafe:
+                    reverse_allowed = False
+                    reverse_gate_reason = "dynamic_gate_failed"
+                else:
+                    reverse_allowed = False
+                    reverse_gate_reason = "not_escape_condition"
+            reverse_candidate["backward_allowed"] = bool(reverse_allowed)
+            reverse_candidate["backward_gated"] = bool(not reverse_allowed)
+            reverse_candidate["backward_gate_reason"] = str(reverse_gate_reason)
+            if not reverse_allowed:
+                infeasible_reasons = list(reverse_candidate.get("infeasible_reasons", []))
+                if "backward_gated" not in infeasible_reasons:
+                    infeasible_reasons.append("backward_gated")
+                reverse_candidate["infeasible_reasons"] = infeasible_reasons
+                reverse_candidate["feasible"] = False
+            penalty_value = float(controller_cfg.backward_penalty) if controller_cfg.backward_penalty_enabled else 0.0
+            penalty_applied = bool(controller_cfg.backward_penalty_enabled)
+            reverse_candidate["backward_penalty_applied"] = penalty_applied
+            reverse_candidate["backward_penalty_value"] = penalty_value
+            reverse_candidate["total_cost_after_backward_penalty"] = float(reverse_cost_before_penalty + penalty_value)
+            reverse_candidate["total_cost"] = float(reverse_candidate["total_cost_after_backward_penalty"])
+            if reverse_candidate is backward_candidate:
+                backward_candidate_cost_before_penalty = reverse_cost_before_penalty
+                backward_candidate_cost_after_penalty = float(reverse_candidate["total_cost_after_backward_penalty"])
+                backward_allowed = bool(reverse_allowed)
+                backward_gate_reason = str(reverse_gate_reason)
 
     for candidate in candidates:
         is_backward_action = _is_backward_candidate(candidate, controller_cfg)
@@ -384,6 +425,7 @@ class BaselineStructuredController:
                 execution_noise_enabled=True,
                 sigma_v=float(self.controller_cfg.sigma_v),
                 sigma_omega=float(self.controller_cfg.sigma_omega),
+                control_dim=action_cont_dim_for_mode(self.controller_cfg.policy_mode),
             )
         candidates = []
         for action_index in effective_runtime_actions(self.controller_cfg):
@@ -434,8 +476,12 @@ class BaselineStructuredController:
         return {
             "action_index": int(chosen["action_index"]),
             "action_name": str(action["name"]),
-            "v": float(action["v"]),
+            "vx": float(action["vx"]),
+            "vy": float(action["vy"]),
+            "v": float(action["vx"]),
             "omega": float(action["omega"]),
+            "wz": float(action["omega"]),
+            "action_cont": action_cont_for_mode(action, self.controller_cfg.policy_mode),
             "debug": {
                 "mode": "baseline_structured_rollout",
                 "horizon": int(self.controller_cfg.horizon),
@@ -487,7 +533,7 @@ class BaselineStructuredController:
         dynamic_obstacles: Sequence[DynamicObstacle],
         control_noise_sequence: np.ndarray | None = None,
     ) -> dict[str, Any]:
-        action = ACTIONS[int(action_index)]
+        action = effective_runtime_actions(self.controller_cfg)[int(action_index)]
         pose = np.asarray(robot_pose, dtype=float).copy()
         rolled_obstacles = [obstacle.clone() for obstacle in dynamic_obstacles]
         robot_rollout_world: list[list[float]] = []
@@ -501,15 +547,15 @@ class BaselineStructuredController:
         infeasible_reasons: list[str] = []
 
         for horizon_index in range(int(self.controller_cfg.horizon)):
-            step_noise = (
-                np.asarray(control_noise_sequence[horizon_index], dtype=float)
-                if control_noise_sequence is not None
-                else np.zeros((2,), dtype=float)
+            step_noise = control_noise_xyz_for_mode(
+                None if control_noise_sequence is None else np.asarray(control_noise_sequence[horizon_index], dtype=float),
+                self.controller_cfg.policy_mode,
             )
-            pose = unicycle_step(
+            pose = holonomic_step(
                 pose,
-                float(action["v"]) + float(step_noise[0]),
-                float(action["omega"]) + float(step_noise[1]),
+                float(action["vx"]) + float(step_noise[0]),
+                float(action["vy"]) + float(step_noise[1]),
+                float(action["omega"]) + float(step_noise[2]),
                 float(self.config.robot_config.dt),
             )
             for obstacle in rolled_obstacles:
@@ -562,15 +608,19 @@ class BaselineStructuredController:
             current_subgoal_world=np.asarray(current_subgoal_world, dtype=float),
             path_world=path_world,
             min_combined_clearance=float(np.min(combined_clearances)) if combined_clearances else float("inf"),
-            velocity_penalty=velocity_penalty_from_action(float(action["v"])),
+            velocity_penalty=velocity_penalty_from_action(float(action["vx"]), float(action["vy"])),
             feasible=feasible,
             controller_cfg=self.controller_cfg,
         )
         return {
             "action_index": int(action_index),
             "action_name": str(action["name"]),
-            "v": float(action["v"]),
+            "vx": float(action["vx"]),
+            "vy": float(action["vy"]),
+            "v": float(action["vx"]),
             "omega": float(action["omega"]),
+            "wz": float(action["omega"]),
+            "action_cont": action_cont_for_mode(action, self.controller_cfg.policy_mode),
             "total_cost_before_backward_penalty": float(score["total_cost"]),
             "total_cost_after_backward_penalty": float(score["total_cost"]),
             "total_cost": float(score["total_cost"]),
@@ -661,8 +711,12 @@ class BaselineStructuredController:
         return {
             "action_index": int(first_sample["action_index"]),
             "action_name": str(first_sample["action_name"]),
+            "vx": float(first_sample["vx"]),
+            "vy": float(first_sample["vy"]),
             "v": float(first_sample["v"]),
             "omega": float(first_sample["omega"]),
+            "wz": float(first_sample["wz"]),
+            "action_cont": list(first_sample["action_cont"]),
             "total_cost_before_backward_penalty": float(stochastic_score),
             "total_cost_after_backward_penalty": float(stochastic_score),
             "total_cost": float(stochastic_score),

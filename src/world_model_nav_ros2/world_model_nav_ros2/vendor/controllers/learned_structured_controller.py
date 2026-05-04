@@ -16,6 +16,7 @@ from world_model_nav_ros2.vendor.policy_eval.robustness import (
 from world_model_nav_ros2.vendor.controllers.baseline_structured_controller import (
     StructuredControllerConfig,
     apply_backward_policy,
+    control_noise_xyz_for_mode,
     dynamic_clearances_from_positions,
     effective_runtime_actions,
     expert_style_rollout_cost,
@@ -31,11 +32,16 @@ from world_model_nav_ros2.vendor.models import (
     StructuredDynamicsModel,
     normalize_model_config,
 )
-from world_model_nav_ros2.vendor.sim2d.config import ACTIONS, DatasetConfig
+from world_model_nav_ros2.vendor.sim2d.config import (
+    DatasetConfig,
+    action_cont_dim_for_mode,
+    action_cont_for_mode,
+    expected_checkpoint_dims_for_mode,
+)
 from world_model_nav_ros2.vendor.sim2d.dynamics import (
     disk_collides_with_occupancy,
+    holonomic_step,
     minimum_static_clearance,
-    unicycle_step,
 )
 from world_model_nav_ros2.vendor.sim2d.obstacles import DynamicObstacle
 from world_model_nav_ros2.vendor.sim2d.waypoint import compute_local_subgoal
@@ -89,6 +95,15 @@ class LearnedStructuredController:
         model_cfg = normalize_model_config(checkpoint.get("config", {}).get("model", {}))
         if bool(model_cfg.get("use_lidar", False)):
             raise ValueError("learned structured controller does not support checkpoints with use_lidar=true")
+        expected_vocab_size, expected_action_cont_dim = expected_checkpoint_dims_for_mode(controller_cfg.policy_mode)
+        actual_vocab_size = int(model_cfg.get("action_vocab_size", expected_vocab_size))
+        actual_action_cont_dim = int(model_cfg.get("action_cont_dim", expected_action_cont_dim))
+        if actual_vocab_size != expected_vocab_size or actual_action_cont_dim != expected_action_cont_dim:
+            raise ValueError(
+                f"Checkpoint does not match policy_mode={controller_cfg.policy_mode!r}: "
+                f"expected action_vocab_size={expected_vocab_size}, action_cont_dim={expected_action_cont_dim}; "
+                f"got action_vocab_size={actual_vocab_size}, action_cont_dim={actual_action_cont_dim}"
+            )
         self.model = StructuredDynamicsModel(StructuredDynamicsConfig(**model_cfg)).to(self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.eval()
@@ -149,6 +164,7 @@ class LearnedStructuredController:
                 execution_noise_enabled=True,
                 sigma_v=float(self.controller_cfg.sigma_v),
                 sigma_omega=float(self.controller_cfg.sigma_omega),
+                control_dim=action_cont_dim_for_mode(self.controller_cfg.policy_mode),
             )
         candidates = []
         for action_index in effective_runtime_actions(self.controller_cfg):
@@ -201,8 +217,12 @@ class LearnedStructuredController:
         return {
             "action_index": int(chosen["action_index"]),
             "action_name": str(action["name"]),
-            "v": float(action["v"]),
+            "vx": float(action["vx"]),
+            "vy": float(action["vy"]),
+            "v": float(action["vx"]),
             "omega": float(action["omega"]),
+            "wz": float(action["omega"]),
+            "action_cont": action_cont_for_mode(action, self.controller_cfg.policy_mode),
             "debug": {
                 "mode": "learned_structured_rollout",
                 "horizon": int(self.controller_cfg.horizon),
@@ -348,7 +368,7 @@ class LearnedStructuredController:
         current_state: dict[str, np.ndarray],
         control_noise_sequence: np.ndarray | None = None,
     ) -> dict[str, Any]:
-        action = ACTIONS[int(action_index)]
+        action = effective_runtime_actions(self.controller_cfg)[int(action_index)]
         pose = np.asarray(robot_pose, dtype=float).copy()
         use_world_state = self.model_type == FACTOR_WORLD_MODEL_TYPE
         pos_state_current = np.asarray(
@@ -389,18 +409,22 @@ class LearnedStructuredController:
         ).astype(np.float32)
 
         action_index_tensor = torch.tensor([int(action_index)], dtype=torch.long, device=self.device)
-        action_cont_tensor = torch.tensor([[float(action["v"]), float(action["omega"])]], dtype=torch.float32, device=self.device)
+        action_cont_tensor = torch.tensor(
+            [action_cont_for_mode(action, self.controller_cfg.policy_mode)],
+            dtype=torch.float32,
+            device=self.device,
+        )
 
         for horizon_index in range(int(self.controller_cfg.horizon)):
-            step_noise = (
-                np.asarray(control_noise_sequence[horizon_index], dtype=float)
-                if control_noise_sequence is not None
-                else np.zeros((2,), dtype=float)
+            step_noise = control_noise_xyz_for_mode(
+                None if control_noise_sequence is None else np.asarray(control_noise_sequence[horizon_index], dtype=float),
+                self.controller_cfg.policy_mode,
             )
-            pose = unicycle_step(
+            pose = holonomic_step(
                 pose,
-                float(action["v"]) + float(step_noise[0]),
-                float(action["omega"]) + float(step_noise[1]),
+                float(action["vx"]) + float(step_noise[0]),
+                float(action["vy"]) + float(step_noise[1]),
+                float(action["omega"]) + float(step_noise[2]),
                 float(self.config.robot_config.dt),
             )
             waypoint = compute_local_subgoal(pose, path_world, self.config.lookahead_distance)
@@ -508,15 +532,19 @@ class LearnedStructuredController:
             current_subgoal_world=np.asarray(current_subgoal_world, dtype=float),
             path_world=path_world,
             min_combined_clearance=float(np.min(combined_clearances)) if combined_clearances else float("inf"),
-            velocity_penalty=velocity_penalty_from_action(float(action["v"])),
+            velocity_penalty=velocity_penalty_from_action(float(action["vx"]), float(action["vy"])),
             feasible=feasible,
             controller_cfg=self.controller_cfg,
         )
         return {
             "action_index": int(action_index),
             "action_name": str(action["name"]),
-            "v": float(action["v"]),
+            "vx": float(action["vx"]),
+            "vy": float(action["vy"]),
+            "v": float(action["vx"]),
             "omega": float(action["omega"]),
+            "wz": float(action["omega"]),
+            "action_cont": action_cont_for_mode(action, self.controller_cfg.policy_mode),
             "total_cost_before_backward_penalty": float(score["total_cost"]),
             "total_cost_after_backward_penalty": float(score["total_cost"]),
             "total_cost": float(score["total_cost"]),
@@ -617,8 +645,12 @@ class LearnedStructuredController:
         return {
             "action_index": int(first_sample["action_index"]),
             "action_name": str(first_sample["action_name"]),
+            "vx": float(first_sample["vx"]),
+            "vy": float(first_sample["vy"]),
             "v": float(first_sample["v"]),
             "omega": float(first_sample["omega"]),
+            "wz": float(first_sample["wz"]),
+            "action_cont": list(first_sample["action_cont"]),
             "total_cost_before_backward_penalty": float(stochastic_score),
             "total_cost_after_backward_penalty": float(stochastic_score),
             "total_cost": float(stochastic_score),

@@ -46,6 +46,7 @@ class PolicyControllerNode(Node):
         self.policy_debug_topic = str(self.get_parameter("policy_debug_topic").value)
         self.control_frequency = float(self.get_parameter("control_frequency").value)
         configured_policy_path = str(self.get_parameter("policy_path").value)
+        self.policy_mode = str(self.get_parameter("policy_mode").value)
         self.robot_radius = float(self.get_parameter("robot_radius").value)
         self.robot_marker_segments = max(8, int(self.get_parameter("robot_marker_segments").value))
         self.robot_marker_line_width = float(self.get_parameter("robot_marker_line_width").value)
@@ -96,9 +97,8 @@ class PolicyControllerNode(Node):
             backward_dynamic_margin=float(
                 self.get_parameter("controller.backward_dynamic_margin").value
             ),
-            action_indices=tuple(
-                int(value) for value in self.get_parameter("controller.action_indices").value
-            ),
+            policy_mode=self.policy_mode,
+            action_indices=self._int_sequence_parameter("controller.action_indices"),
         )
 
         self.controller = WorldModelPolicyController(nav_config, controller_config)
@@ -137,7 +137,7 @@ class PolicyControllerNode(Node):
         self.timer = self.create_timer(1.0 / max(self.control_frequency, 1e-6), self._on_timer)
         self.get_logger().info(
             "Policy controller ready: "
-            f"policy={nav_config.policy_path}, path={self.path_topic}, "
+            f"mode={self.policy_mode}, policy={nav_config.policy_path}, path={self.path_topic}, "
             f"tracked={self.tracked_waypoint_topic}, cmd={self.cmd_vel_topic}, "
             f"debug={self.policy_debug_topic}"
         )
@@ -154,6 +154,7 @@ class PolicyControllerNode(Node):
         self.declare_parameter("policy_debug_topic", "/world_model_nav/policy_debug")
         self.declare_parameter("control_frequency", 10.0)
         self.declare_parameter("policy_path", default_policy_path())
+        self.declare_parameter("policy_mode", "quadruped")
         self.declare_parameter("device", "auto")
         self.declare_parameter("policy_seed", 0)
 
@@ -165,7 +166,7 @@ class PolicyControllerNode(Node):
         self.declare_parameter("inflation_margin", 0.05)
         self.declare_parameter("map_occupied_threshold", 50)
         self.declare_parameter("treat_unknown_as_occupied", True)
-        self.declare_parameter("dynamic_obstacle_radius", 0.5)
+        self.declare_parameter("dynamic_obstacle_radius", 1.0)
         self.declare_parameter("expected_dynamic_obstacles", 4)
         self.declare_parameter("min_obstacle_dt", 1e-3)
         self.declare_parameter("dynamic_obstacle_stale_timeout", 1.0)
@@ -187,7 +188,23 @@ class PolicyControllerNode(Node):
         self.declare_parameter("controller.backward_gate_enabled", True)
         self.declare_parameter("controller.dynamic_stop_clearance_threshold", 0.20)
         self.declare_parameter("controller.backward_dynamic_margin", 0.10)
-        self.declare_parameter("controller.action_indices", [0, 1, 2, 3, 4, 5, 6])
+        self.declare_parameter("controller.action_indices", "")
+
+    def _int_sequence_parameter(self, name: str) -> tuple[int, ...]:
+        value = self.get_parameter(name).value
+        if value is None:
+            return ()
+        if isinstance(value, int):
+            return (int(value),)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return ()
+            parsed = json.loads(stripped)
+            if isinstance(parsed, int):
+                return (int(parsed),)
+            return tuple(int(item) for item in parsed)
+        return tuple(int(item) for item in value)
 
     def _on_map(self, msg: OccupancyGrid) -> None:
         origin_yaw = yaw_from_quaternion(msg.info.origin.orientation)
@@ -221,7 +238,7 @@ class PolicyControllerNode(Node):
     def _on_path(self, msg: NavPath) -> None:
         changed = self.controller.set_path(path_from_msg(msg))
         if changed and not msg.poses:
-            self._publish_cmd(np.zeros((2,), dtype=np.float32))
+            self._publish_cmd(np.zeros((3,), dtype=np.float32))
 
     def _on_tracked_waypoint(self, msg: PoseStamped) -> None:
         self.controller.set_tracked_waypoint(
@@ -258,7 +275,8 @@ class PolicyControllerNode(Node):
     def _publish_cmd(self, command: np.ndarray) -> None:
         msg = Twist()
         msg.linear.x = float(command[0])
-        msg.angular.z = float(command[1])
+        msg.linear.y = float(command[1])
+        msg.angular.z = float(command[2])
         self.cmd_pub.publish(msg)
 
     def _publish_robot_marker(self) -> None:
@@ -307,8 +325,11 @@ class PolicyControllerNode(Node):
         msg.data = json.dumps(
             {
                 "action": str(result.selected_action_name),
+                "vx": float(result.command[0]),
+                "vy": float(result.command[1]),
                 "v": float(result.command[0]),
-                "omega": float(result.command[1]),
+                "omega": float(result.command[2]),
+                "wz": float(result.command[2]),
                 "min_clearance": (
                     None
                     if result.chosen_action_min_clearance is None

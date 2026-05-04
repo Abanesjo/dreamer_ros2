@@ -11,7 +11,14 @@ from world_model_nav_ros2.vendor.controllers.learned_structured_controller impor
     LearnedStructuredController,
 )
 from world_model_nav_ros2.vendor.sim2d.astar import astar_search, path_to_world
-from world_model_nav_ros2.vendor.sim2d.config import DatasetConfig, MapConfig, RobotConfig
+from world_model_nav_ros2.vendor.sim2d.config import (
+    QUADRUPED_POLICY_MODE,
+    DatasetConfig,
+    MapConfig,
+    RobotConfig,
+    default_action_indices_for_mode,
+    normalize_policy_mode,
+)
 from world_model_nav_ros2.vendor.sim2d.utils import (
     inflate_occupancy_grid,
     occupied_cell_centers,
@@ -32,7 +39,7 @@ class NavigationConfig:
     inflation_margin: float = 0.05
     map_occupied_threshold: int = 50
     treat_unknown_as_occupied: bool = True
-    dynamic_obstacle_radius: float = 0.5
+    dynamic_obstacle_radius: float = 1.0
     expected_dynamic_obstacles: int = 4
     min_obstacle_dt: float = 1e-3
     dynamic_obstacle_stale_timeout: float = 1.0
@@ -57,9 +64,12 @@ class ControllerConfigValues:
     backward_gate_enabled: bool = True
     dynamic_stop_clearance_threshold: float = 0.20
     backward_dynamic_margin: float = 0.10
-    action_indices: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6)
+    policy_mode: str = QUADRUPED_POLICY_MODE
+    action_indices: tuple[int, ...] = ()
 
     def to_vendor_config(self) -> StructuredControllerConfig:
+        policy_mode = normalize_policy_mode(self.policy_mode)
+        action_indices = self.action_indices or default_action_indices_for_mode(policy_mode)
         return StructuredControllerConfig(
             horizon=int(self.horizon),
             w_progress=float(self.w_progress),
@@ -78,7 +88,8 @@ class ControllerConfigValues:
             backward_gate_enabled=bool(self.backward_gate_enabled),
             dynamic_stop_clearance_threshold=float(self.dynamic_stop_clearance_threshold),
             backward_dynamic_margin=float(self.backward_dynamic_margin),
-            action_indices=tuple(int(value) for value in self.action_indices),
+            policy_mode=policy_mode,
+            action_indices=tuple(int(value) for value in action_indices),
         )
 
 
@@ -165,7 +176,7 @@ class WaypointResult:
 
 
 def zero_command() -> np.ndarray:
-    return np.zeros((2,), dtype=np.float32)
+    return np.zeros((3,), dtype=np.float32)
 
 
 def occupancy_from_ros_data(
@@ -580,7 +591,10 @@ class WorldModelPolicyController:
                 tracking_active=self.tracking_active,
             )
 
-        command = np.array([float(decision["v"]), float(decision["omega"])], dtype=np.float32)
+        command = np.array(
+            [float(decision["vx"]), float(decision["vy"]), float(decision["omega"])],
+            dtype=np.float32,
+        )
         decision_debug = dict(decision.get("debug", {}))
         chosen_debug = dict(decision_debug.get("chosen", {}))
         self._pending_commit = {
@@ -588,7 +602,7 @@ class WorldModelPolicyController:
             "robot_pose_est_t": robot_pose_for_policy.copy(),
             "dynamic_obstacles_t": self._snapshot_obstacles(dynamic_obstacles),
             "action_index": int(decision["action_index"]),
-            "action_cont": command.copy(),
+            "action_cont": np.asarray(decision.get("action_cont", command), dtype=np.float32).copy(),
             "path_world": self.path_world.copy(),
         }
         return StepResult(

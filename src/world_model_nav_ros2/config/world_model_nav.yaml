@@ -22,6 +22,7 @@
     map_image_figure_size: [8.0, 8.0]
     map_image_dpi: 120
     policy_path: ""
+    policy_mode: quadruped
     device: auto
     policy_seed: 0
 
@@ -33,7 +34,8 @@
     inflation_margin: 0.05
     map_occupied_threshold: 50
     treat_unknown_as_occupied: true
-    dynamic_obstacle_radius: 0.5
+    dynamic_obstacle_radius: 1.0
+    visual_dynamic_obstacle_radius: 0.5
     expected_dynamic_obstacles: 4
     min_obstacle_dt: 0.001
     dynamic_obstacle_stale_timeout: 1.0
@@ -56,4 +58,4 @@
       backward_gate_enabled: true
       dynamic_stop_clearance_threshold: 0.20
       backward_dynamic_margin: 0.10
-      action_indices: [0, 1, 2, 3, 4, 5, 6]
+      action_indices: ""
