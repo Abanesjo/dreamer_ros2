@@ -105,6 +105,7 @@ private:
     declare_parameter("map_occupied_threshold", 50);
     declare_parameter("treat_unknown_as_occupied", true);
     declare_parameter("planner_tolerance", 0.0);
+    declare_parameter("clearance_target", 0.60);
   }
 
   void loadParameters()
@@ -120,6 +121,7 @@ private:
     map_occupied_threshold_ = get_parameter("map_occupied_threshold").as_int();
     treat_unknown_as_occupied_ = get_parameter("treat_unknown_as_occupied").as_bool();
     planner_tolerance_ = get_parameter("planner_tolerance").as_double();
+    clearance_target_ = get_parameter("clearance_target").as_double();
   }
 
   void onMap(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
@@ -222,7 +224,9 @@ private:
       grid,
       start_cell.value(),
       goal_cell.value(),
-      planner_tolerance_);
+      planner_tolerance_,
+      {},
+      clearance_target_);
 
     if (!result.success) {
       has_path_ = false;
@@ -285,6 +289,7 @@ private:
   int64_t map_occupied_threshold_{50};
   bool treat_unknown_as_occupied_{true};
   double planner_tolerance_{0.0};
+  double clearance_target_{0.60};
 
   std::optional<GridSpec> grid_;
   std::optional<std::array<double, 2>> robot_xy_;

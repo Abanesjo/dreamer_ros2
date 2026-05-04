@@ -99,19 +99,23 @@ void MaximinAStarPlanner::configure(
   nav2_util::declare_parameter_if_not_declared(
     node_, name_ + ".tolerance", rclcpp::ParameterValue(0.0));
   nav2_util::declare_parameter_if_not_declared(
+    node_, name_ + ".clearance_target", rclcpp::ParameterValue(0.0));
+  nav2_util::declare_parameter_if_not_declared(
     node_, name_ + ".allow_unknown", rclcpp::ParameterValue(false));
   nav2_util::declare_parameter_if_not_declared(
     node_, name_ + ".use_final_approach_orientation", rclcpp::ParameterValue(false));
 
   node_->get_parameter(name_ + ".tolerance", tolerance_);
+  node_->get_parameter(name_ + ".clearance_target", clearance_target_);
   node_->get_parameter(name_ + ".allow_unknown", allow_unknown_);
   node_->get_parameter(name_ + ".use_final_approach_orientation", use_final_approach_orientation_);
 
   RCLCPP_INFO(
     node_->get_logger(),
-    "Configured %s with tolerance=%.3f, allow_unknown=%s",
+    "Configured %s with tolerance=%.3f, clearance_target=%.3f, allow_unknown=%s",
     name_.c_str(),
     tolerance_,
+    clearance_target_,
     allow_unknown_ ? "true" : "false");
 }
 
@@ -164,7 +168,8 @@ nav_msgs::msg::Path MaximinAStarPlanner::createPlan(
   }
 
   const MaximinPlanResult result =
-    planMaximinClearancePath(grid, start_cell, goal_cell, tolerance_, cancel_checker);
+    planMaximinClearancePath(
+      grid, start_cell, goal_cell, tolerance_, cancel_checker, clearance_target_);
 
   if (!result.success) {
     if (result.message == "Planning was canceled.") {

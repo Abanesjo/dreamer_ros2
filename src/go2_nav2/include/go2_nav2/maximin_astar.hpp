@@ -64,7 +64,8 @@ MaximinPlanResult planMaximinClearancePath(
   const GridCell & start,
   const GridCell & goal,
   double goal_tolerance_m = 0.0,
-  const std::function<bool()> & cancel_checker = {});
+  const std::function<bool()> & cancel_checker = {},
+  double clearance_target_m = 0.0);
 
 }  // namespace go2_nav2
 

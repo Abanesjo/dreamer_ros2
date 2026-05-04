@@ -91,6 +91,78 @@ TEST(MaximinAStar, ChoosesWiderGateOverShorterNarrowGate)
   EXPECT_FALSE(crossed_narrow_gate);
 }
 
+TEST(MaximinAStar, ClearanceTargetKeepsWiderGateWhenAlternativesAreBelowTarget)
+{
+  auto grid = makeGrid(15, 9);
+  blockBoundaries(grid);
+
+  for (unsigned int y = 1; y < grid.height - 1; ++y) {
+    if (y == 2 || y == 5 || y == 6 || y == 7) {
+      continue;
+    }
+    block(grid, 7, y);
+  }
+
+  const auto result = go2_nav2::planMaximinClearancePath(
+    grid,
+    go2_nav2::GridCell{2, 2},
+    go2_nav2::GridCell{12, 2},
+    0.0,
+    {},
+    3.0);
+
+  ASSERT_TRUE(result.success) << result.message;
+
+  bool crossed_wide_gate = false;
+  bool crossed_narrow_gate = false;
+  for (const auto & cell : result.cells) {
+    if (cell.x != 7) {
+      continue;
+    }
+    crossed_wide_gate = crossed_wide_gate || cell.y == 6;
+    crossed_narrow_gate = crossed_narrow_gate || cell.y == 2;
+  }
+
+  EXPECT_TRUE(crossed_wide_gate);
+  EXPECT_FALSE(crossed_narrow_gate);
+}
+
+TEST(MaximinAStar, ClearanceTargetAllowsShorterGateWhenBothRoutesAreClearEnough)
+{
+  auto grid = makeGrid(15, 9);
+  blockBoundaries(grid);
+
+  for (unsigned int y = 1; y < grid.height - 1; ++y) {
+    if (y == 2 || y == 5 || y == 6 || y == 7) {
+      continue;
+    }
+    block(grid, 7, y);
+  }
+
+  const auto result = go2_nav2::planMaximinClearancePath(
+    grid,
+    go2_nav2::GridCell{2, 2},
+    go2_nav2::GridCell{12, 2},
+    0.0,
+    {},
+    1.0);
+
+  ASSERT_TRUE(result.success) << result.message;
+
+  bool crossed_wide_gate = false;
+  bool crossed_narrow_gate = false;
+  for (const auto & cell : result.cells) {
+    if (cell.x != 7) {
+      continue;
+    }
+    crossed_wide_gate = crossed_wide_gate || cell.y == 6;
+    crossed_narrow_gate = crossed_narrow_gate || cell.y == 2;
+  }
+
+  EXPECT_FALSE(crossed_wide_gate);
+  EXPECT_TRUE(crossed_narrow_gate);
+}
+
 TEST(MaximinAStar, DoesNotCutDiagonalCorners)
 {
   auto grid = makeGrid(2, 2);

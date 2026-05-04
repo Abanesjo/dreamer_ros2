@@ -146,8 +146,8 @@ local_costmap:
           observation_persistence: 0.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.0
-        inflation_radius: 0.90
+        cost_scaling_factor: 0.5
+        inflation_radius: 0.80
       always_send_full_costmap: true
       introspection_mode: "disabled"
 
@@ -184,6 +184,7 @@ planner_server:
     GridBased:
       plugin: "go2_nav2::MaximinAStarPlanner"
       tolerance: 0.5
+      clearance_target: 0.60
       allow_unknown: false
       use_final_approach_orientation: false
 

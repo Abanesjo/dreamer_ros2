@@ -43,6 +43,30 @@ bool sameClearance(double lhs, double rhs)
   return std::abs(lhs - rhs) <= kEpsilon;
 }
 
+double scoreClearance(double clearance, double clearance_target_m)
+{
+  if (clearance_target_m <= 0.0) {
+    return clearance;
+  }
+  return std::min(clearance, clearance_target_m);
+}
+
+std::vector<double> scoreClearances(
+  const std::vector<double> & clearances,
+  double clearance_target_m)
+{
+  if (clearance_target_m <= 0.0) {
+    return clearances;
+  }
+
+  std::vector<double> scored;
+  scored.reserve(clearances.size());
+  for (const double clearance : clearances) {
+    scored.push_back(scoreClearance(clearance, clearance_target_m));
+  }
+  return scored;
+}
+
 bool betterLabel(
   double candidate_clearance,
   double candidate_length,
@@ -420,7 +444,8 @@ MaximinPlanResult planMaximinClearancePath(
   const GridCell & start,
   const GridCell & goal,
   double goal_tolerance_m,
-  const std::function<bool()> & cancel_checker)
+  const std::function<bool()> & cancel_checker,
+  double clearance_target_m)
 {
   if (!grid.valid()) {
     return MaximinPlanResult{false, "Planning grid is invalid.", {}, goal};
@@ -436,8 +461,9 @@ MaximinPlanResult planMaximinClearancePath(
   }
 
   const std::vector<double> clearances = computeClearanceMap(grid);
+  const std::vector<double> scored_clearances = scoreClearances(clearances, clearance_target_m);
   const std::vector<GoalCandidate> candidates =
-    findGoalCandidates(grid, clearances, goal, std::max(0.0, goal_tolerance_m));
+    findGoalCandidates(grid, scored_clearances, goal, std::max(0.0, goal_tolerance_m));
 
   if (candidates.empty()) {
     return MaximinPlanResult{false, "Goal is inside occupied space.", {}, goal};
@@ -445,7 +471,7 @@ MaximinPlanResult planMaximinClearancePath(
 
   for (const GoalCandidate & candidate : candidates) {
     MaximinPlanResult result =
-      planToFixedGoal(grid, clearances, start, candidate.cell, cancel_checker);
+      planToFixedGoal(grid, scored_clearances, start, candidate.cell, cancel_checker);
     if (result.success) {
       return result;
     }

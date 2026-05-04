@@ -43,6 +43,7 @@ private:
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   double tolerance_{0.0};
+  double clearance_target_{0.0};
   bool allow_unknown_{false};
   bool use_final_approach_orientation_{false};
 };
