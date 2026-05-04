@@ -106,6 +106,7 @@ controller_server:
           "PathAlignCritic",
           "PathFollowCritic",
           "PathAngleCritic",
+          "PreferForwardCritic",
         ]
       ConstraintCritic:
         enabled: true
@@ -154,11 +155,16 @@ controller_server:
       PathAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 2.0
+        cost_weight: 4.0
         offset_from_furthest: 4
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
-        mode: 1
+        mode: 0
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 8.0
+        threshold_to_consider: 0.5
 
 local_costmap:
   local_costmap:
