@@ -77,9 +77,9 @@ controller_server:
       vy_std: 0.45
       wz_std: 0.80
       vx_max: 0.8
-      vx_min: -1.0
-      vy_max: 0.8
-      wz_max: 1.5
+      vx_min: -0.4
+      vy_max: 0.4
+      wz_max: 0.6
       iteration_count: 1
       temperature: 0.20
       gamma: 0.015
@@ -282,8 +282,8 @@ velocity_smoother:
     scale_velocities: false
     feedback: "OPEN_LOOP"
     enable_stamped_cmd_vel: false
-    max_velocity: [0.8, 0.8, 1.5]
-    min_velocity: [-1.0, -0.8, -1.5]
+    max_velocity: [0.8, 0.4, 0.6]
+    min_velocity: [-0.4, -0.4, -0.6]
     max_accel: [2.5, 2.5, 5.0]
     max_decel: [-2.5, -2.5, -5.0]
     odom_topic: "/odom"
