@@ -6,6 +6,10 @@
   <arg name="scan_topic" default="/scan" description="Laser scan topic consumed by Nav2."/>
   <arg name="goal_topic" default="/goal_pose" description="PoseStamped topic accepted by Nav2 BT navigator."/>
   <arg name="cmd_vel_topic" default="/cmd_vel" description="Final smoothed velocity command topic for go2_controller."/>
+  <arg name="dwb_evaluation_topic" default="/FollowPath/evaluation,/evaluation" description="Comma-separated DWB LocalPlanEvaluation topic candidates used for downsampled rollout visualization."/>
+  <arg name="trajectory_topic" default="/trajectories" description="MarkerArray topic for downsampled DWB rollout visualization."/>
+  <arg name="max_visualized_trajectories" default="150" description="Maximum DWB rollouts to publish to RViz."/>
+  <arg name="trajectory_publish_frequency" default="5.0" description="Maximum downsampled rollout visualization publish rate."/>
 
   <include file="$(find-pkg-share go2_nav2)/launch/go2_nav2.launch.xml">
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
@@ -16,4 +20,13 @@
     <arg name="goal_topic" value="$(var goal_topic)"/>
     <arg name="cmd_vel_topic" value="$(var cmd_vel_topic)"/>
   </include>
+
+  <node pkg="go2_nav2" exec="dwb_trajectory_visualizer_node.py" name="dwb_trajectory_visualizer" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="evaluation_topic" value="$(var dwb_evaluation_topic)"/>
+    <param name="trajectory_topic" value="$(var trajectory_topic)"/>
+    <param name="fallback_frame_id" value="$(var global_frame)"/>
+    <param name="max_trajectories" value="$(var max_visualized_trajectories)"/>
+    <param name="publish_frequency" value="$(var trajectory_publish_frequency)"/>
+  </node>
 </launch>

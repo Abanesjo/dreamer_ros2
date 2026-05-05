@@ -62,6 +62,12 @@ install(
 )
 
 install(
+  PROGRAMS
+    scripts/dwb_trajectory_visualizer_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(
   FILES maximin_astar_plugin.xml
   DESTINATION share/${PROJECT_NAME}
 )

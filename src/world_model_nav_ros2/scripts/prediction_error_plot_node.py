@@ -14,13 +14,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import rclpy
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from rclpy.node import Node
 
 
 # Optional hardcoded defaults for quick local use. ROS parameters override these.
-HARDCODED_CSV_PATH = "/home/john/workspaces/navigation_ws/src/dreamer_ros2/src/world_model_nav_ros2/data/quadruped/prediction_log_quadruped_20260504_182010_182595.csv"
+HARDCODED_CSV_PATH = "/home/john/workspaces/navigation_ws/src/dreamer_ros2/src/world_model_nav_ros2/data/quadruped/prediction_log_quadruped_20260505_034527_628229.csv"
 HARDCODED_PLOT_ROOT = ""
 HARDCODED_POLICY_MODE = ""
+PLOT_STYLE = "seaborn-v0_8-whitegrid"
+PLOT_FIG_SIZE = (10.0, 8.2)
+PLOT_TITLE_FONT_SIZE = 24
+PLOT_SUBTITLE_FONT_SIZE = 18
+PLOT_AXIS_FONT_SIZE = 20
+PLOT_TICK_FONT_SIZE = 20
+PLOT_GRID_LINEWIDTH = 1.35
 
 
 @dataclass(frozen=True)
@@ -80,25 +89,15 @@ class PredictionErrorPlotNode(Node):
 
         metrics = self._compute_metrics(filtered_rows, filtered_counts)
         metrics_path = output_dir / f"{csv_path.stem}_metrics.csv"
-        signed_plot_path = output_dir / f"{csv_path.stem}_signed.png"
         unsigned_plot_path = output_dir / f"{csv_path.stem}_unsigned.png"
 
         self._write_metrics(metrics_path, metrics)
         self._write_plot(
-            signed_plot_path,
-            filtered_rows,
-            policy_mode=policy_mode,
-            absolute=False,
-        )
-        self._write_plot(
             unsigned_plot_path,
             filtered_rows,
-            policy_mode=policy_mode,
-            absolute=True,
         )
         self.get_logger().info(f"Wrote metrics: {metrics_path}")
-        self.get_logger().info(f"Wrote signed plot: {signed_plot_path}")
-        self.get_logger().info(f"Wrote unsigned plot: {unsigned_plot_path}")
+        self.get_logger().info(f"Wrote plot: {unsigned_plot_path}")
 
     def _configured_csv_path(self) -> Path | None:
         raw_path = str(self.get_parameter("csv_path").value).strip()
@@ -390,34 +389,49 @@ class PredictionErrorPlotNode(Node):
         self,
         plot_path: Path,
         rows: list[dict[str, object]],
-        *,
-        policy_mode: str,
-        absolute: bool,
     ) -> None:
-        fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(8.4, 7.0), dpi=140)
-        try:
-            self._plot_metric(
-                axes[0],
-                rows,
-                row_key="signed_displacement_error_m",
-                ylabel=("Absolute displacement error [m]" if absolute else "Signed displacement error [m]"),
-                absolute=absolute,
-            )
-            self._plot_metric(
-                axes[1],
-                rows,
-                row_key="signed_heading_error_deg",
-                ylabel=("Absolute heading error [deg]" if absolute else "Signed heading error [deg]"),
-                absolute=absolute,
-            )
-            axes[1].set_xlabel("Prediction horizon [s]")
-            axes[0].legend(loc="best")
-            error_kind = "Unsigned" if absolute else "Signed"
-            fig.suptitle(f"World Model Dynamic Obstacle Prediction {error_kind} Error ({policy_mode})")
-            fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-            fig.savefig(plot_path)
-        finally:
-            plt.close(fig)
+        with plt.style.context(PLOT_STYLE):
+            fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=PLOT_FIG_SIZE, dpi=140)
+            try:
+                self._plot_metric(
+                    axes[0],
+                    rows,
+                    row_key="signed_displacement_error_m",
+                    ylabel="Displacement Error [m]",
+                )
+                self._plot_metric(
+                    axes[1],
+                    rows,
+                    row_key="signed_heading_error_deg",
+                    ylabel="Heading Error [deg]",
+                )
+                axes[1].set_xlabel("Prediction horizon [s]", fontsize=PLOT_AXIS_FONT_SIZE)
+                fig.suptitle(
+                    "Dynamic Obstacle Prediction Error",
+                    y=0.985,
+                    fontsize=PLOT_TITLE_FONT_SIZE,
+                    fontweight="bold",
+                )
+                fig.text(
+                    0.5,
+                    0.925,
+                    "Error based on world-frame coordinate convention.\nHeading error based on angle wr.t. horizon origin",
+                    ha="center",
+                    va="top",
+                    fontsize=PLOT_SUBTITLE_FONT_SIZE,
+                    linespacing=1.25,
+                )
+                fig.legend(
+                    handles=self._mean_std_legend_handles(),
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, 0.87),
+                    ncol=2,
+                    frameon=False,
+                )
+                fig.subplots_adjust(left=0.115, right=0.985, bottom=0.115, top=0.805, hspace=0.12)
+                fig.savefig(plot_path)
+            finally:
+                plt.close(fig)
 
     def _plot_metric(
         self,
@@ -426,45 +440,23 @@ class PredictionErrorPlotNode(Node):
         *,
         row_key: str,
         ylabel: str,
-        absolute: bool,
     ) -> None:
-        x_values, mean_values, std_values = self._metric_summary(
-            rows,
-            row_key=row_key,
-            absolute=absolute,
-        )
+        x_values, mean_values, std_values = self._metric_summary(rows, row_key=row_key)
         lower_values = [
-            max(0.0, mean_value - std_value) if absolute else mean_value - std_value
+            max(0.0, mean_value - std_value)
             for mean_value, std_value in zip(mean_values, std_values)
         ]
         upper_values = [
             mean_value + std_value
             for mean_value, std_value in zip(mean_values, std_values)
         ]
-        scatter_x = [float(row["horizon_time_sec"]) for row in rows]
-        scatter_y = [
-            abs(float(row[row_key])) if absolute else float(row[row_key])
-            for row in rows
-        ]
 
-        if not absolute:
-            ax.axhline(0.0, color="0.25", linewidth=1.0, alpha=0.75)
-        ax.scatter(
-            scatter_x,
-            scatter_y,
-            s=14,
-            alpha=0.28,
-            color="tab:blue",
-            edgecolors="none",
-            label="Samples",
-        )
         ax.fill_between(
             x_values,
             lower_values,
             upper_values,
-            color="tab:orange",
-            alpha=0.25,
-            label="Mean +/- 1 std",
+            color="tab:blue",
+            alpha=0.18,
         )
         ax.plot(
             x_values,
@@ -472,23 +464,37 @@ class PredictionErrorPlotNode(Node):
             color="tab:orange",
             marker="o",
             linewidth=2.0,
-            label="Mean error",
+            markersize=4.5,
         )
-        ax.set_ylabel(ylabel)
-        ax.grid(True, alpha=0.35)
+        ax.set_ylabel(ylabel, fontsize=PLOT_AXIS_FONT_SIZE)
+        ax.tick_params(axis="both", labelsize=PLOT_TICK_FONT_SIZE)
+        ax.minorticks_on()
+        ax.grid(True, which="major", color="black", alpha=0.5, linewidth=PLOT_GRID_LINEWIDTH)
+        ax.grid(True, which="minor", color="black", alpha=0.28, linewidth=PLOT_GRID_LINEWIDTH * 0.7)
+
+    def _mean_std_legend_handles(self) -> list[Patch | Line2D]:
+        return [
+            Patch(facecolor="tab:blue", edgecolor="tab:blue", alpha=0.18, label="Mean +/- 1 std"),
+            Line2D(
+                [0],
+                [0],
+                color="tab:orange",
+                marker="o",
+                linewidth=2.0,
+                markersize=4.5,
+                label="Mean",
+            ),
+        ]
 
     def _metric_summary(
         self,
         rows: list[dict[str, object]],
         *,
         row_key: str,
-        absolute: bool,
     ) -> tuple[list[float], list[float], list[float]]:
         grouped: dict[int, list[tuple[float, float]]] = defaultdict(list)
         for row in rows:
-            value = float(row[row_key])
-            if absolute:
-                value = abs(value)
+            value = abs(float(row[row_key]))
             grouped[int(row["horizon_step"])].append((float(row["horizon_time_sec"]), value))
 
         x_values: list[float] = []
