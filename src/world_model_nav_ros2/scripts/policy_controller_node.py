@@ -348,14 +348,19 @@ class PolicyControllerNode(Node):
         if result.selected_action_name is None:
             return
         msg = String()
+        prediction_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
         msg.data = json.dumps(
             {
                 "action": str(result.selected_action_name),
+                "action_index": result.selected_action_index,
                 "vx": float(result.command[0]),
                 "vy": float(result.command[1]),
                 "v": float(result.command[0]),
                 "omega": float(result.command[2]),
                 "wz": float(result.command[2]),
+                "policy_mode": self.policy_mode,
+                "prediction_dt_sec": float(self.controller.control_dt),
+                "prediction_stamp_sec": float(prediction_stamp_sec),
                 "min_clearance": (
                     None
                     if result.chosen_action_min_clearance is None

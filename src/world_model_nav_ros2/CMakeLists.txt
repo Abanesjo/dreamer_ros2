@@ -21,6 +21,8 @@ install(PROGRAMS
   scripts/waypoint_tracker_node.py
   scripts/policy_controller_node.py
   scripts/map_image_publisher_node.py
+  scripts/prediction_logger_node.py
+  scripts/prediction_error_plot_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

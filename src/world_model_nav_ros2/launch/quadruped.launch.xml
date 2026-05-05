@@ -3,6 +3,8 @@
   <arg name="frame_id" default="odom"/>
   <arg name="params_file" default="$(find-pkg-share world_model_nav_ros2)/config/world_model_nav.yaml"/>
   <arg name="policy_path" default="$(find-pkg-share world_model_nav_ros2)/model/quadruped.pt"/>
+  <arg name="prediction_logging_enabled" default="true"/>
+  <arg name="prediction_log_data_dir" default="$(find-pkg-share world_model_nav_ros2)/../../../../src/dreamer_ros2/src/world_model_nav_ros2/data"/>
 
   <node pkg="go2_nav2" exec="maximin_astar_planner_node" name="world_model_nav_astar_planner" output="screen">
     <param from="$(var params_file)"/>
@@ -28,5 +30,12 @@
     <param from="$(var params_file)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="frame_id" value="$(var frame_id)"/>
+  </node>
+
+  <node if="$(var prediction_logging_enabled)" pkg="world_model_nav_ros2" exec="prediction_logger_node.py" name="world_model_nav_prediction_logger" output="screen">
+    <param from="$(var params_file)"/>
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="policy_mode" value="quadruped"/>
+    <param name="prediction_log_data_dir" value="$(var prediction_log_data_dir)"/>
   </node>
 </launch>
