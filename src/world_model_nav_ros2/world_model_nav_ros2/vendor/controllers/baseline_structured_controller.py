@@ -273,6 +273,58 @@ def apply_backward_policy(
     }
 
 
+def fallback_safety_key(candidate: dict[str, Any]) -> tuple[object, ...]:
+    """Rank infeasible fallback candidates by immediate safety before task progress."""
+    collision_flags = _combined_collision_flags(candidate)
+    collision_count = sum(1 for value in collision_flags if value)
+    first_collision_step = next(
+        (index for index, value in enumerate(collision_flags) if value),
+        len(collision_flags),
+    )
+    min_combined_clearance = _finite_or(
+        candidate.get("min_combined_clearance"),
+        min(
+            _finite_or(candidate.get("min_static_clearance"), float("-inf")),
+            _finite_or(candidate.get("min_dynamic_clearance"), float("-inf")),
+        ),
+    )
+    min_dynamic_clearance = _finite_or(candidate.get("min_dynamic_clearance"), float("-inf"))
+    min_static_clearance = _finite_or(candidate.get("min_static_clearance"), float("-inf"))
+    return (
+        bool(collision_flags[0]) if collision_flags else False,
+        int(collision_count),
+        -int(first_collision_step),
+        -float(min_combined_clearance),
+        -float(min_dynamic_clearance),
+        -float(min_static_clearance),
+        0 if _is_stop_candidate(candidate) else 1,
+        float(candidate.get("total_cost", float("inf"))),
+    )
+
+
+def _combined_collision_flags(candidate: dict[str, Any]) -> list[bool]:
+    dynamic = [bool(value) for value in candidate.get("dynamic_collisions", [])]
+    static = [bool(value) for value in candidate.get("static_collisions", [])]
+    planning = [bool(value) for value in candidate.get("planning_collisions", [])]
+    horizon = max(len(dynamic), len(static), len(planning), 1)
+    flags: list[bool] = []
+    for index in range(horizon):
+        flags.append(
+            (dynamic[index] if index < len(dynamic) else False)
+            or (static[index] if index < len(static) else False)
+            or (planning[index] if index < len(planning) else False)
+        )
+    return flags
+
+
+def _finite_or(value: object, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return number if np.isfinite(number) else float(default)
+
+
 def path_tangent_penalty(pose: np.ndarray, path_world: np.ndarray) -> float:
     if len(path_world) < 2:
         return 0.0
@@ -469,8 +521,8 @@ class BaselineStructuredController:
             chosen = min(feasible_all, key=lambda item: float(item["total_cost"]))
             selection_mode = "feasible_all"
         else:
-            chosen = min(candidates, key=lambda item: float(item["total_cost"]))
-            selection_mode = "fallback_all"
+            chosen = min(candidates, key=fallback_safety_key)
+            selection_mode = "fallback_safest"
         backward_debug["backward_selected"] = bool(_is_backward_candidate(chosen, self.controller_cfg))
         action = effective_runtime_actions(self.controller_cfg)[int(chosen["action_index"])]
         return {

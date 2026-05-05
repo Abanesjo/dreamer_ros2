@@ -16,6 +16,7 @@
     <param from="$(var params_file)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="frame_id" value="$(var frame_id)"/>
+    <param name="waypoint_frequency" value="20.0"/>
   </node>
 
   <node pkg="world_model_nav_ros2" exec="policy_controller_node.py" name="world_model_nav_policy_controller" output="screen">
@@ -24,12 +25,19 @@
     <param name="frame_id" value="$(var frame_id)"/>
     <param name="policy_path" value="$(var policy_path)"/>
     <param name="policy_mode" value="quadruped"/>
+    <param name="control_frequency" value="20.0"/>
+    <param name="controller.horizon" value="20"/>
+    <param name="controller.w_progress" value="1.5"/>
+    <param name="controller.w_heading" value="0.5"/>
+    <param name="controller.w_path" value="0.5"/>
+    <param name="controller.min_clearance_clip" value="0.02"/>
   </node>
 
   <node pkg="world_model_nav_ros2" exec="map_image_publisher_node.py" name="world_model_nav_map_image_publisher" output="screen">
     <param from="$(var params_file)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="frame_id" value="$(var frame_id)"/>
+    <param name="map_image_frequency" value="20.0"/>
   </node>
 
   <node if="$(var prediction_logging_enabled)" pkg="world_model_nav_ros2" exec="prediction_logger_node.py" name="world_model_nav_prediction_logger" output="screen">

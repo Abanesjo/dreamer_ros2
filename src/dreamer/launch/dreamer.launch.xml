@@ -5,6 +5,10 @@
   <arg name="map_topic" default="/map"/>
   <arg name="bbox_topic" default="/bbox_3d"/>
   <arg name="marker_topic" default="/dynamic_obstacles"/>
+  <arg name="odom_topic" default="/odom"/>
+  <arg name="path_topic" default="/path"/>
+  <arg name="path_logger_service" default="/path_logger"/>
+  <arg name="path_log_data_dir" default="$(find-pkg-share dreamer)/../../../../src/dreamer_ros2/src/dreamer/data"/>
   <arg name="radius" default="0.5"/>
   <arg name="segments" default="64"/>
   <arg name="line_width" default="0.04"/>
@@ -24,6 +28,14 @@
     <param name="radius" value="$(var radius)"/>
     <param name="segments" value="$(var segments)"/>
     <param name="line_width" value="$(var line_width)"/>
+  </node>
+
+  <node pkg="dreamer" exec="path_logger_node.py" name="dreamer_path_logger" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="odom_topic" value="$(var odom_topic)"/>
+    <param name="path_topic" value="$(var path_topic)"/>
+    <param name="path_logger_service" value="$(var path_logger_service)"/>
+    <param name="path_log_data_dir" value="$(var path_log_data_dir)"/>
   </node>
 
   <node if="$(var rviz)" pkg="rviz2" exec="rviz2" name="rviz2" output="screen" args="-d $(var rviz_config)">

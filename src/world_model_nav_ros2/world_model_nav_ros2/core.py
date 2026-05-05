@@ -108,6 +108,8 @@ class RuntimeDynamicObstacle:
     position: np.ndarray
     radius: float
     velocity_vector: np.ndarray
+    age_sec: float = 0.0
+    observed: bool = True
 
     @property
     def velocity(self) -> np.ndarray:
@@ -119,6 +121,8 @@ class RuntimeDynamicObstacle:
             position=self.position.copy(),
             radius=float(self.radius),
             velocity_vector=self.velocity_vector.copy(),
+            age_sec=float(self.age_sec),
+            observed=bool(self.observed),
         )
 
     def step(self, dt: float) -> None:
@@ -130,6 +134,9 @@ class RuntimeDynamicObstacle:
             "position": self.position.copy(),
             "velocity": self.velocity_vector.copy(),
             "radius": float(self.radius),
+            "age_sec": float(self.age_sec),
+            "observed": bool(self.observed),
+            "extrapolated": not bool(self.observed),
         }
 
 
@@ -165,6 +172,18 @@ class StepResult:
     num_feasible_non_stop: int | None = None
     num_feasible_all: int | None = None
     obstacle_count: int | None = None
+    expected_obstacle_count: int | None = None
+    chosen_feasible: bool | None = None
+    chosen_min_static_clearance: float | None = None
+    chosen_min_dynamic_clearance: float | None = None
+    chosen_dynamic_collision: bool | None = None
+    backward_selected: bool | None = None
+    backward_allowed: bool | None = None
+    backward_gate_reason: str | None = None
+    stop_min_dynamic_clearance: float | None = None
+    stop_dynamic_collision: bool | None = None
+    normal_non_stop_static_or_planning_feasible_count: int | None = None
+    normal_non_stop_dynamic_feasible_count: int | None = None
     chosen_infeasible_reasons: tuple[str, ...] = ()
     visualization: dict[str, Any] | None = None
 
@@ -288,6 +307,8 @@ class DynamicObstacleTracker:
                     position=np.asarray(rendered_position, dtype=float).reshape(2),
                     radius=self.radius,
                     velocity_vector=velocity.astype(float),
+                    age_sec=float(age),
+                    observed=bool(obstacle_id in observed_ids),
                 )
             )
 
@@ -518,7 +539,12 @@ class WorldModelPolicyController:
 
     def step(self) -> StepResult:
         if not self.tracking_active or self.path_world is None or len(self.path_world) == 0:
-            return StepResult(command=zero_command(), tracking_active=False)
+            return StepResult(
+                command=zero_command(),
+                tracking_active=False,
+                obstacle_count=len(self.obstacle_tracker.obstacles),
+                expected_obstacle_count=int(self.nav_config.expected_dynamic_obstacles),
+            )
 
         ready_message = self._readiness_error()
         if ready_message is not None:
@@ -527,6 +553,8 @@ class WorldModelPolicyController:
                 message=ready_message,
                 message_level="warning",
                 tracking_active=self.tracking_active,
+                obstacle_count=len(self.obstacle_tracker.obstacles),
+                expected_obstacle_count=int(self.nav_config.expected_dynamic_obstacles),
             )
 
         assert self.robot_pose is not None
@@ -549,6 +577,8 @@ class WorldModelPolicyController:
                     message=f"Policy commit failed; controller state was reset: {exc}",
                     message_level="error",
                     tracking_active=self.tracking_active,
+                    obstacle_count=len(dynamic_obstacles),
+                    expected_obstacle_count=int(self.nav_config.expected_dynamic_obstacles),
                 )
 
         if np.linalg.norm(self.robot_pose[:2] - self.path_world[-1]) <= float(self.nav_config.goal_tolerance):
@@ -562,6 +592,8 @@ class WorldModelPolicyController:
                 message_level="info",
                 goal_reached=True,
                 tracking_active=False,
+                obstacle_count=len(dynamic_obstacles),
+                expected_obstacle_count=int(self.nav_config.expected_dynamic_obstacles),
             )
 
         robot_pose_for_policy = self.robot_pose.copy()
@@ -592,6 +624,8 @@ class WorldModelPolicyController:
                 message=f"Policy action selection failed: {exc}",
                 message_level="error",
                 tracking_active=self.tracking_active,
+                obstacle_count=len(dynamic_obstacles),
+                expected_obstacle_count=int(self.nav_config.expected_dynamic_obstacles),
             )
 
         command = np.array(
@@ -625,6 +659,30 @@ class WorldModelPolicyController:
             num_feasible_non_stop=int(decision_debug.get("num_feasible_non_stop", 0)),
             num_feasible_all=int(decision_debug.get("num_feasible_all", 0)),
             obstacle_count=len(dynamic_obstacles),
+            expected_obstacle_count=int(self.nav_config.expected_dynamic_obstacles),
+            chosen_feasible=bool(chosen_debug.get("feasible", False)),
+            chosen_min_static_clearance=self._finite_float_or_none(
+                chosen_debug.get("min_static_clearance")
+            ),
+            chosen_min_dynamic_clearance=self._finite_float_or_none(
+                chosen_debug.get("min_dynamic_clearance")
+            ),
+            chosen_dynamic_collision=bool(
+                any(bool(value) for value in self._sequence(chosen_debug.get("dynamic_collisions", [])))
+            ),
+            backward_selected=bool(decision_debug.get("backward_selected", False)),
+            backward_allowed=bool(decision_debug.get("backward_allowed", False)),
+            backward_gate_reason=str(decision_debug.get("backward_gate_reason", "")),
+            stop_min_dynamic_clearance=self._finite_float_or_none(
+                decision_debug.get("stop_min_dynamic_clearance")
+            ),
+            stop_dynamic_collision=bool(decision_debug.get("stop_dynamic_collision", False)),
+            normal_non_stop_static_or_planning_feasible_count=int(
+                decision_debug.get("normal_non_stop_static_or_planning_feasible_count", 0)
+            ),
+            normal_non_stop_dynamic_feasible_count=int(
+                decision_debug.get("normal_non_stop_dynamic_feasible_count", 0)
+            ),
             chosen_infeasible_reasons=tuple(str(reason) for reason in chosen_debug.get("infeasible_reasons", [])),
             visualization=visualization,
         )
@@ -728,7 +786,7 @@ class WorldModelPolicyController:
             "rollouts": rollouts,
             "selected_dynamic_obstacle_predictions": {
                 "obstacle_ids": [str(obstacle.obstacle_id) for obstacle in dynamic_obstacles],
-                "radius": float(self.nav_config.visual_dynamic_obstacle_radius),
+                "radius": float(self.nav_config.dynamic_obstacle_radius),
                 "positions": prediction_steps,
             },
         }

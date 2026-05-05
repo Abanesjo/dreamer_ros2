@@ -345,20 +345,29 @@ class PolicyControllerNode(Node):
             self.get_logger().info(result.message)
 
     def _publish_policy_debug(self, result: StepResult) -> None:
-        if result.selected_action_name is None:
-            return
         msg = String()
         prediction_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
+        visualization = dict(result.visualization) if isinstance(result.visualization, dict) else {}
+        policy_obstacles = self._policy_obstacle_payload()
+        visualization["current_dynamic_obstacles"] = policy_obstacles
+        action_name = "none" if result.selected_action_name is None else str(result.selected_action_name)
+        action_index = -1 if result.selected_action_index is None else int(result.selected_action_index)
         msg.data = json.dumps(
             {
-                "action": str(result.selected_action_name),
-                "action_index": result.selected_action_index,
+                "action": action_name,
+                "action_index": action_index,
                 "vx": float(result.command[0]),
                 "vy": float(result.command[1]),
                 "v": float(result.command[0]),
                 "omega": float(result.command[2]),
                 "wz": float(result.command[2]),
                 "policy_mode": self.policy_mode,
+                "command_active": result.selected_action_name is not None,
+                "tracking_active": bool(result.tracking_active),
+                "goal_reached": bool(result.goal_reached),
+                "message": result.message,
+                "message_level": result.message_level,
+                "ready": result.selected_action_name is not None,
                 "prediction_dt_sec": float(self.controller.control_dt),
                 "prediction_stamp_sec": float(prediction_stamp_sec),
                 "min_clearance": (
@@ -370,15 +379,53 @@ class PolicyControllerNode(Node):
                     None if result.pose_estimate_error is None else float(result.pose_estimate_error)
                 ),
                 "selection_mode": result.selection_mode,
+                "chosen_feasible": result.chosen_feasible,
+                "chosen_min_static_clearance": result.chosen_min_static_clearance,
+                "chosen_min_dynamic_clearance": result.chosen_min_dynamic_clearance,
+                "chosen_dynamic_collision": result.chosen_dynamic_collision,
+                "backward_selected": result.backward_selected,
+                "backward_allowed": result.backward_allowed,
+                "backward_gate_reason": result.backward_gate_reason,
+                "stop_min_dynamic_clearance": result.stop_min_dynamic_clearance,
+                "stop_dynamic_collision": result.stop_dynamic_collision,
+                "normal_non_stop_static_or_planning_feasible_count": (
+                    result.normal_non_stop_static_or_planning_feasible_count
+                ),
+                "normal_non_stop_dynamic_feasible_count": result.normal_non_stop_dynamic_feasible_count,
                 "num_feasible_non_stop": result.num_feasible_non_stop,
                 "num_feasible_all": result.num_feasible_all,
-                "obstacle_count": result.obstacle_count,
+                "obstacle_count": policy_obstacles["count"],
+                "expected_obstacle_count": policy_obstacles["expected_count"],
+                "policy_obstacles": policy_obstacles,
                 "reasons": list(result.chosen_infeasible_reasons),
-                "visualization": result.visualization or {},
+                "visualization": visualization,
             },
             sort_keys=True,
         )
         self.policy_debug_pub.publish(msg)
+
+    def _policy_obstacle_payload(self) -> dict[str, object]:
+        obstacles = []
+        for obstacle in self.controller.obstacles:
+            position = np.asarray(obstacle.position, dtype=float).reshape(2)
+            velocity = np.asarray(obstacle.velocity, dtype=float).reshape(2)
+            obstacles.append(
+                {
+                    "id": str(obstacle.obstacle_id),
+                    "position": [float(position[0]), float(position[1])],
+                    "velocity": [float(velocity[0]), float(velocity[1])],
+                    "radius": float(obstacle.radius),
+                    "age_sec": float(obstacle.age_sec),
+                    "observed": bool(obstacle.observed),
+                    "extrapolated": not bool(obstacle.observed),
+                }
+            )
+        return {
+            "expected_count": int(self.controller.nav_config.expected_dynamic_obstacles),
+            "count": int(len(obstacles)),
+            "radius": float(self.controller.nav_config.dynamic_obstacle_radius),
+            "obstacles": obstacles,
+        }
 
     def _publish_visualization_markers(self, result: StepResult) -> None:
         visualization = result.visualization if isinstance(result.visualization, dict) else {}

@@ -1,3 +1,5 @@
 /**/__pycache__/
 /**/data/*
 /**/plots/*
+!/**/data/.gitkeep
+!/**/plots/.gitkeep

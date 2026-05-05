@@ -9,17 +9,20 @@ find_package(ament_cmake REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rviz2 REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(vision_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 install(PROGRAMS
   scripts/bbox_circle_markers.py
   scripts/map_publisher.py
+  scripts/path_logger_node.py
+  scripts/path_log_plot_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(
-  DIRECTORY launch map rviz
+  DIRECTORY launch map rviz data plots
   DESTINATION share/${PROJECT_NAME}
 )
 

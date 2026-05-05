@@ -20,6 +20,7 @@ from world_model_nav_ros2.vendor.controllers.baseline_structured_controller impo
     dynamic_clearances_from_positions,
     effective_runtime_actions,
     expert_style_rollout_cost,
+    fallback_safety_key,
     _is_backward_candidate,
     planning_point_collision,
     robot_frame_points,
@@ -219,8 +220,8 @@ class LearnedStructuredController:
             chosen = min(feasible_all, key=lambda item: float(item["total_cost"]))
             selection_mode = "feasible_all"
         else:
-            chosen = min(candidates, key=lambda item: float(item["total_cost"]))
-            selection_mode = "fallback_all"
+            chosen = min(candidates, key=fallback_safety_key)
+            selection_mode = "fallback_safest"
         backward_debug["backward_selected"] = bool(_is_backward_candidate(chosen, self.controller_cfg))
         action = effective_runtime_actions(self.controller_cfg)[int(chosen["action_index"])]
         return {

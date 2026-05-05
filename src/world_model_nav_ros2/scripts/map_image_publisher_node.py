@@ -60,7 +60,7 @@ class MapImagePublisherNode(Node):
         self.figure_size = self._figure_size_parameter("map_image_figure_size")
         self.dpi = int(self.get_parameter("map_image_dpi").value)
         self.robot_radius = float(self.get_parameter("robot_radius").value)
-        self.dynamic_obstacle_radius = float(self.get_parameter("visual_dynamic_obstacle_radius").value)
+        self.dynamic_obstacle_radius = float(self.get_parameter("dynamic_obstacle_radius").value)
         self.map_occupied_threshold = int(self.get_parameter("map_occupied_threshold").value)
         self.treat_unknown_as_occupied = bool(self.get_parameter("treat_unknown_as_occupied").value)
 
@@ -251,7 +251,9 @@ class MapImagePublisherNode(Node):
                     marker="x",
                     s=45,
                 )
-            for obstacle in self._obstacles:
+            policy_obstacles = self._policy_debug_obstacles()
+            active_obstacles = self._obstacles if policy_obstacles is None else policy_obstacles
+            for obstacle in active_obstacles:
                 self._draw_dynamic_obstacle(ax, obstacle)
 
             ax.set_title(self._policy_title)
@@ -367,13 +369,17 @@ class MapImagePublisherNode(Node):
         feasible_non_stop = payload.get("num_feasible_non_stop", "?")
         feasible_all = payload.get("num_feasible_all", "?")
         obstacles = payload.get("obstacle_count", "?")
+        expected_obstacles = payload.get("expected_obstacle_count", "?")
+        chosen_feasible = payload.get("chosen_feasible", "?")
+        backward_gate = str(payload.get("backward_gate_reason", ""))
         reasons = payload.get("reasons", [])
         reason_text = ",".join(str(reason) for reason in reasons) if reasons else "none"
         return (
             f"World-Model-Nav | action={action} | {selection} | "
             f"cmd=({vx},{vy},{omega}) | "
             f"clearance={clearance}m | pose_err={pose_error}m | "
-            f"feasible={feasible_non_stop}/{feasible_all} | obstacles={obstacles} | reasons={reason_text}"
+            f"feasible={feasible_non_stop}/{feasible_all} | chosen_ok={chosen_feasible} | "
+            f"obstacles={obstacles}/{expected_obstacles} | backward={backward_gate} | reasons={reason_text}"
         )
 
     def _format_optional_float(self, value: object, *, precision: int) -> str:
@@ -387,6 +393,30 @@ class MapImagePublisherNode(Node):
     def _marker_radius(self, marker: Marker, center: np.ndarray) -> float:
         del marker, center
         return self.dynamic_obstacle_radius
+
+    def _policy_debug_obstacles(self) -> list[RenderedObstacle] | None:
+        payload = self._visualization.get("current_dynamic_obstacles")
+        if not isinstance(payload, dict):
+            return None
+        raw_obstacles = payload.get("obstacles", [])
+        if not isinstance(raw_obstacles, list):
+            return []
+        default_radius = self._positive_float(payload.get("radius"), default=self.dynamic_obstacle_radius)
+        obstacles: list[RenderedObstacle] = []
+        for raw_obstacle in raw_obstacles:
+            if not isinstance(raw_obstacle, dict):
+                continue
+            position = self._xy_tuple(raw_obstacle.get("position"))
+            if position is None:
+                continue
+            radius = self._positive_float(raw_obstacle.get("radius"), default=default_radius)
+            obstacles.append(
+                RenderedObstacle(
+                    position=np.asarray(position, dtype=float),
+                    radius=radius,
+                )
+            )
+        return obstacles
 
     def _xy_array(self, values: object) -> np.ndarray | None:
         if not isinstance(values, list):
