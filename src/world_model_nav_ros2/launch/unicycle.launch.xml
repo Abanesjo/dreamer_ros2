@@ -30,7 +30,6 @@
     <param from="$(var params_file)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="frame_id" value="$(var frame_id)"/>
-    <param name="map_image_frequency" value="10.0"/>
   </node>
 
   <node if="$(var prediction_logging_enabled)" pkg="world_model_nav_ros2" exec="prediction_logger_node.py" name="world_model_nav_prediction_logger" output="screen">

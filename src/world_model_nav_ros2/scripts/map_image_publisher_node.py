@@ -251,9 +251,7 @@ class MapImagePublisherNode(Node):
                     marker="x",
                     s=45,
                 )
-            policy_obstacles = self._policy_debug_obstacles()
-            active_obstacles = self._obstacles if policy_obstacles is None else policy_obstacles
-            for obstacle in active_obstacles:
+            for obstacle in self._obstacles:
                 self._draw_dynamic_obstacle(ax, obstacle)
 
             ax.set_title(self._policy_title)
@@ -393,30 +391,6 @@ class MapImagePublisherNode(Node):
     def _marker_radius(self, marker: Marker, center: np.ndarray) -> float:
         del marker, center
         return self.dynamic_obstacle_radius
-
-    def _policy_debug_obstacles(self) -> list[RenderedObstacle] | None:
-        payload = self._visualization.get("current_dynamic_obstacles")
-        if not isinstance(payload, dict):
-            return None
-        raw_obstacles = payload.get("obstacles", [])
-        if not isinstance(raw_obstacles, list):
-            return []
-        default_radius = self._positive_float(payload.get("radius"), default=self.dynamic_obstacle_radius)
-        obstacles: list[RenderedObstacle] = []
-        for raw_obstacle in raw_obstacles:
-            if not isinstance(raw_obstacle, dict):
-                continue
-            position = self._xy_tuple(raw_obstacle.get("position"))
-            if position is None:
-                continue
-            radius = self._positive_float(raw_obstacle.get("radius"), default=default_radius)
-            obstacles.append(
-                RenderedObstacle(
-                    position=np.asarray(position, dtype=float),
-                    radius=radius,
-                )
-            )
-        return obstacles
 
     def _xy_array(self, values: object) -> np.ndarray | None:
         if not isinstance(values, list):
